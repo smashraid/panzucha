@@ -1,0 +1,16 @@
+form:
+  login:
+    title: "Bienvenido, inicie sesión"
+    field:
+      email: "Correo Electronico"
+      password: "Contraseña"
+    validation:
+      required:
+        email: "Este campo es requerido"
+        password: "Este campo es requerido"
+    action:
+      submit: "Ingresar"
+      forgotpassword: "Olvido su contraseña"
+      logout: "Salir"
+    message:
+      welcome: "Has iniciado sesión como"

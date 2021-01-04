@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "*.html": "twig"
+    },
+    "emmet.includeLanguages": {
+        "twig": "html"
+    },
+    "symfony-vscode.phpExecutablePath": "C:\\Program Files\\php\\php.exe"
+}

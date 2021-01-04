@@ -1,0 +1,13 @@
+<div class="mx-auto text-center  c-form">
+    <img class="mb-4" src="{{asset('icons/logo5.svg')}}" alt="" width="72" height="72">    
+    <h1 class="h3 mb-3 font-weight-normal">Hi!</h1>
+	<div class="text-justify">
+		<p>To reset your password, please visit the following link</p>
+		<a href="{{ url('app_reset_password', {token: resetToken.token}) }}">{{ url('app_reset_password', {token: resetToken.token}) }}</a>
+		<p>This link will expire in
+			{{ tokenLifetime|date('g') }}
+			hour(s).
+        </p>
+		<p>Cheers!</p>
+	</div>
+</div>

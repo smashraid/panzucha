@@ -1,0 +1,16 @@
+form:
+  login:
+    title: "Please sign in"
+    field:
+      email: "Email Address"
+      password: "Password"
+    validation:
+      required:
+        email: "This field is required"
+        password: "This field is required"
+    action:
+      submit: "Sign in"
+      forgotpassword: "Forgot your password"
+      logout: "Logout"
+    message:
+      welcome: "You are logged in as"

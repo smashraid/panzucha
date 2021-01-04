@@ -1,0 +1,52 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Hello AccountController!
+{% endblock %}
+
+{% block navbar %}
+	{{ include('account/_nav_mobile.html.twig') }}
+{% endblock %}
+
+{% block body %}
+	<div class="container-md">
+		<div class="row">
+			<div class="col-12 col-sm-3">
+				{{ include('account/_nav.html.twig') }}
+			</div>
+			<div class="col-12 col-sm-9">
+				<div class="card c-card shadow-light-lg mb-5">
+					<div class="card-header">
+						<h4 class="mb-0">Basic Information</h4>
+					</div>
+					<div class="card-body">
+						{{ form_start(form, {'attr': {'class': 'site-form'}}) }}
+						{{ form_row(form.firstname, {
+                            label: 'Firstname'
+                        }) }}
+						{{ form_row(form.lastname, {
+                            label: 'Apellido'
+                        }) }}
+						{{ form_row(form.phone, {
+                            label: 'Telefono'
+                        }) }}
+						{{ form_row(form.email, {
+                            label: 'Correo'
+                        }) }}
+						<button type="submit" class="btn btn-primary">Update Information</button>
+						{{ form_end(form) }}
+					</div>
+				</div>
+				<div class="card card-bleed shadow-light-lg mb-5">
+					<div class="card-header">
+						<h4 class="mb-0">Basic Information</h4>
+					</div>
+					<div class="card-body">
+						{% for address in addresses %}
+							{{ address.street1 ~ " " ~ address.street2 ~ " " ~ address.city ~ ", " ~ address.state }}
+						{% endfor %}
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{% endblock %}

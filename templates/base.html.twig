@@ -1,12 +1,105 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="UTF-8">
-        <title>{% block title %}Welcome!{% endblock %}</title>
-        {% block stylesheets %}{% endblock %}
-    </head>
-    <body>
-        {% block body %}{% endblock %}
-        {% block javascripts %}{% endblock %}
-    </body>
+<!doctype html>
+<html lang="en">
+	<head>
+		<!-- Required meta tags -->
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+		<title>
+			{% block title %}Panzucha
+			{% endblock %}
+		</title>
+		<!-- Bootstrap CSS -->
+		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/css/bootstrap.min.css" integrity="sha384-TX8t27EcRE3e/ihU7zmQxVncDAy5uIKz4rEkgIXeMed4M0jlfIDPvg6uqKI2xXr2" crossorigin="anonymous"> {% block stylesheets %}{% endblock %}
+		<link rel="stylesheet" href="{{ asset('site.css') }}"/>
+		<script src="https://kit.fontawesome.com/7e010643f7.js" crossorigin="anonymous"></script>
+	</head>
+	<body id="menu">
+		<nav class="navbar navbar-expand-lg navbar-light bg-oxford-blue fixed-top c-navbar">
+			<a class="navbar-brand text-white" href="#">
+				<img src="{{asset('icons/logo5.svg')}}" width="30" height="30" class="d-inline-block align-top" alt="" loading="lazy">
+				Panzucha
+			</a>
+			<div class="my-2 my-lg-0 ml-auto d-block d-lg-none">
+				<a href="#" class="mx-1"data-toggle="modal" data-target="#exampleModal">
+					<svg class="bi text-platinum" width="30" height="30" fill="currentColor">
+						<use xlink:href="{{asset('icons/bootstrap-icons.svg#cart4')}}"/>
+					</svg>
+					<span class="badge badge-danger position-absolute">3</span>
+				</a>
+				<a href="{{ path('account') }}" class="mx-3">
+					<svg class="bi text-platinum" width="30" height="30" fill="currentColor">
+						<use xlink:href="{{asset('icons/bootstrap-icons.svg#person-fill')}}"/>
+					</svg>
+				</a>
+			</div>
+			<div class="navbar-dark">
+				<button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavAltMarkup" aria-controls="navbarNavAltMarkup" aria-expanded="false" aria-label="Toggle navigation">
+					<span class="navbar-toggler-icon"></span>
+				</button>
+			</div>
+			<div class="collapse navbar-collapse" id="navbarNavAltMarkup">
+				<div class="navbar-nav mr-auto">
+					<a class="nav-link active text-platinum" href="{{ path('menu') }}">Menu
+						<span class="sr-only">(current)</span>
+					</a>
+				</div>
+				<div class="my-2 my-lg-0 d-none d-lg-block">
+					<a href="#" class="mx-1" data-toggle="modal" data-target="#exampleModal">
+						<svg class="bi text-platinum" width="30" height="30" fill="currentColor">
+							<use xlink:href="{{asset('icons/bootstrap-icons.svg#cart4')}}"/>
+						</svg>
+						<span class="badge badge-danger position-absolute">3</span>
+					</a>
+					<a href="{{ path('account') }}" class="mx-3">
+						<svg class="bi text-platinum" width="30" height="30" fill="currentColor">
+							<use xlink:href="{{asset('icons/bootstrap-icons.svg#person-fill')}}"/>
+						</svg>
+					</a>
+				</div>			
+		</nav>		
+		<main class="c-content">
+			{% block navbar %}{% endblock %}
+			{% block body %}{% endblock %}
+		</main>
+		{% block modal %}{% endblock %}
+		<footer class="bg-oxford-blue fixed-bottom c-navbar">
+			<div class="row">
+				<div class="col-sm-8 py-3 text-center text-platinum">
+					<span class="mx-2">
+						<i class="fas fa-map-marker-alt"></i>
+						<label class="ml-2">Av La Marca 123 - San Jose<label></span>
+							|
+							<span class="mx-2">
+								<i class="fas fa-phone-alt"></i>
+								<label class="ml-2">990-657-123</label>
+							</span>
+							|
+							<span class="mx-2">
+								<i class="far fa-envelope"></i>
+								<label class="ml-2">contacto@panzucha.com</label>
+							</span>
+						</div>
+						<div class="col-sm-4 py-3 text-center">
+							<a href="" class="mx-3">
+								<i class="fab fa-facebook-f fa-lg text-platinum"></i>
+							</a>
+							<a href="" class="mx-3">
+								<i class="fab fa-twitter fa-lg text-platinum"></i>
+							</a>
+							<a href="" class="mx-3">
+								<i class="fab fa-instagram fa-lg text-platinum"></i>
+							</a>
+						</div>
+					</div>
+				</footer>
+
+				<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
+				<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+				<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/js/bootstrap.min.js" integrity="sha384-w1Q4orYjBQndcko6MimVbzY0tgp4pWB4lZ7lr30WKz0vr/aWKhXdBNmNb5D92v7s" crossorigin="anonymous"></script>
+				<script src="https://unpkg.com/vue@next"></script>
+				<script src="{{ asset('site.js') }}"></script>
+				{% block javascripts %}{% endblock %}
+			</body>
+		</html>
+	</body>
 </html>

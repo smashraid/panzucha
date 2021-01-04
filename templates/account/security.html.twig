@@ -1,0 +1,31 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Hello AccountController!
+{% endblock %}
+
+{% block navbar %}
+	{{ include('account/_nav_mobile.html.twig') }}
+{% endblock %}
+
+{% block body %}
+	<div class="container-md">
+		<div class="row">
+			<div class="col-12 col-sm-3">
+				{{ include('account/_nav.html.twig') }}
+			</div>
+			<div class="col-12 col-sm-9">
+				<div class="card c-card shadow-light-lg mb-5">
+					<div class="card-header">
+						<h4 class="mb-0">Change Password</h4>
+					</div>
+					<div class="card-body">
+						{{ form_start(resetForm) }}
+						{{ form_row(resetForm.plainPassword) }}
+						<button class="btn btn-primary">Reset password</button>
+						{{ form_end(resetForm) }}
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{% endblock %}

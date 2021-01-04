@@ -1,0 +1,87 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Hello MenuController!
+{% endblock %}
+
+{% block body %}
+	<div class="container">
+		<div class="row">
+			{% for category in categories %}
+				<div class="col-12 col-sm-6">
+					<h2 class="text-center text-uppercase bg-celadon-blue text-white py-2">{{ category.name }}</h2>
+					<ul class="list-unstyled">
+						{% for product in category.products %}
+							{% set p = {
+								id: product.id,
+								name: product.name,
+								price: product.price,
+								image: 'images/' ~ product.image,
+								quantity: 1
+							} %}
+							<li class="media mb-3">
+								<img src="{{asset(p.image)}}" class="mr-3" alt="" width="40">
+								<div class="media-body">
+									<h5 class="mt-0 mb-1 text-persian-green">{{ product.name}}</h5>
+									{{ product.description|raw}}
+								</div>
+								<div class="d-flex flex-column justify-content-center align-items-center mr-lg-5">
+									<div class="align-self-center">
+										<span class="text-black">{{product.price|number_format(2)}}</span>
+									</div>
+									<div class="align-self-center">
+										<a @click="add({{p|json_encode()}})" class="stretched-link1 c-link">
+											<svg class="bi text-imperial-red" width="22" height="22" fill="currentColor">
+												<use xlink:href="{{asset('icons/bootstrap-icons.svg#bag-plus')}}"/>
+											</svg>
+										</a>
+									</div>									
+								</div>								
+							</li>
+						{% endfor %}
+					</ul>
+				</div>
+			{% endfor %}
+		</div>
+	</div>
+{% endblock %}
+
+{% block modal %}
+	<div class="modal modal-right fade c-cart" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+		<div class="modal-dialog">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="exampleModalLabel">Your Cart</h5>
+					<button type="button" class="close" data-dismiss="modal" aria-label="Close">
+						<span aria-hidden="true">&times;</span>
+					</button>
+				</div>
+				<div class="modal-body c-cart-wrapper">
+					<div v-for="item in items" class="border-bottom">
+						<div class="d-flex align-items-center my-3">							
+							<img class="img-fluid rounded c-cart-image" :src="item.image" alt="product">							
+							<div class="w-100">
+								<a class="close pr-2" href="#">
+									<svg class="bi text-dark" width="30" height="30" fill="currentColor">
+										<use xlink:href="{{asset('icons/bootstrap-icons.svg#x')}}"></use>
+									</svg>
+								</a>
+								<div class="pl-3">
+									<span class="text-dark">${item.name}</span>
+									<small class="d-block text-muted">Quantity: ${item.quantity}</small>
+									<strong class="d-block text-sm">${item.price}</strong>
+								</div>
+							</div>
+						</div>
+					</div>					
+				</div>
+				<div class="modal-footer">
+					<div class="w-100">
+						<h5 class="mb-4">Subtotal: <span class="float-right">$465.32</span></h5>
+					</div>
+					<button type="button" class="btn btn-secondary btn-block" data-dismiss="modal">Close</button>
+					<button type="button" class="btn btn-primary btn-block">Checkout</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{% endblock %}

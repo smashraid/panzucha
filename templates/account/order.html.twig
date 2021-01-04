@@ -1,0 +1,57 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Hello AccountController!
+{% endblock %}
+
+{% block navbar %}
+	{{ include('account/_nav_mobile.html.twig') }}
+{% endblock %}
+
+{% block body %}
+	<div class="container-md">
+		<div class="row">
+			<div class="col-12 col-sm-3">
+				{{ include('account/_nav.html.twig') }}
+			</div>
+			<div class="col-12 col-sm-9">
+				<div class="card c-card shadow-light-lg mb-5">
+					<div class="card-header">
+						<h4 class="mb-0">Orders</h4>
+					</div>
+					<div class="card-body">
+						<div class="table-responsive">
+							<table class="table table-bordered table-hover table-sm">
+								<thead>
+									<tr class="bg-taupe-gray">
+										<th>Id</th>
+										<th>Status</th>
+										<th>Order Placed</th>										
+										<th>Total</th>										
+										<th></th>
+									</tr>
+								</thead>
+								<tbody>
+									{% for order in orders %}
+										<tr class="bg-opal">
+											<th scope="col">{{ order.id }}</th>
+											<td>{{ order.status }}</td>												
+											<td>{{ order.orderDate ? order.orderDate|date('Y-m-d') : '' }}</td>
+											<td>{{ order.shippingAmount + order.orderSubtotal }}</td>											
+											<td>												
+												<a href="{{ path('order_detail', {'id': ordere.id}) }}" class="btn btn-link">Detail</a>
+											</td>
+										</tr>
+									{% else %}
+										<tr>
+											<td colspan="5">no records found</td>
+										</tr>
+									{% endfor %}
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{% endblock %}

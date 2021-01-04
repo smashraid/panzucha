@@ -1,0 +1,254 @@
+:root {
+  --black: #000000ff;
+  --oxford-blue: #14213dff;
+  --orange-web: #fca311ff;
+  --platinum: #e5e5e5ff;
+  --white: #ffffffff;
+  --honeydew: #f1faeeff;
+  --imperial-red: #e63946ff;
+  --persian-green: #2a9d8fff;
+  --powder-blue: #a8dadcff;
+  --celadon-blue: #457b9dff;
+}
+
+body {
+    background-color: var(--platinum);
+    color: var(--black);
+    margin: 0 auto;    
+}
+
+.c-breadcrumb {
+  background: transparent;
+  margin-bottom: 0;
+}
+
+.c-navbar {  
+  margin: 0 auto;
+}
+
+.c-content {
+  padding-top: 70px;
+  padding-bottom: 70px;
+}
+
+.c-link {
+  cursor: pointer;
+}
+
+.c-card {
+  width: auto;
+  min-width: 100%;
+  margin-right: -20px;
+  margin-left: -20px;
+  border-radius: .375rem;
+}
+
+.c-card .card-header {
+  background: transparent;
+}
+
+.c-card .card-body,.c-card .card-footer,.c-card .card-header {
+  padding-right: 20px;
+  padding-left: 20px;
+  border-radius: 0
+}
+
+.card-list .list-link {
+  position: relative
+}
+
+.card-list .list-link::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2rem;
+  border-right: 3px solid var(--oxford-blue);
+  display: none
+}
+
+.card-list .list-link:hover {
+  color: #161c2d!important
+}
+
+.card-list .active .list-link {
+  color: #161c2d!important
+}
+
+.card-list .active .list-link::before {
+  display: block
+}
+
+.c-card .card-list .list-link::before {
+  left: -20px
+}
+
+.c-card .card-link::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2rem;
+  border-right: 2px solid #335eea;
+  display: none;
+}
+
+.modal.modal-left .modal-dialog,.modal.modal-right .modal-dialog {
+  max-width: 345px;
+  min-height: 100vh
+}
+
+.modal.modal-left.show .modal-dialog,.modal.modal-right.show .modal-dialog {
+  -webkit-transform: translate(0);
+  transform: translate(0)
+}
+
+.modal.modal-left .modal-content,.modal.modal-right .modal-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+  height: 100vh;
+  border-radius: 0
+}
+
+.modal.modal-left .modal-dialog {
+  margin: 0 auto 0 0;
+  -webkit-transform: translate(-100%);
+  transform: translate(-100%)
+}
+
+.modal.modal-right {
+  padding-right: 0!important
+}
+
+.modal.modal-right .modal-dialog {
+  margin: 0 0 0 auto;
+  -webkit-transform: translate(100%);
+  transform: translate(100%)
+}
+
+.c-cart-wrapper {
+  overflow-y: auto;
+  max-height: calc(100vh - 312px);
+  max-height: calc(var(--vh, 1vh)*100 - 312px);
+  margin-right: -3rem;
+  padding-right: 2.6rem;
+}
+
+.c-cart-image {
+  max-width: 75px;
+}
+
+.list {
+  margin-bottom: 0;
+  padding-left: 0;
+  list-style-type: none
+}
+
+.list-item+.list-item {
+  margin-top: .35rem
+}
+
+.list-link {
+  display: -webkit-box;
+  display: flex;
+  flex-wrap: nowrap;
+  -webkit-box-align: center;
+  align-items: center;
+  font-size: .9375rem;
+  color: #506690
+}
+
+.list-link:focus,.list-link:hover {
+  text-decoration: none;
+  color: #335eea
+}
+
+.c-form {
+  width: 100%;
+  max-width: 330px;
+  padding: 15px;
+  margin: auto;
+}
+
+.bg-oxford-blue {
+  background-color: var(--oxford-blue);
+}
+
+.bg-celadon-blue {
+  background-color: var(--celadon-blue);
+}
+
+.bg-orange-web {
+  background-color: var(--orange-web);
+}
+
+.bg-persian-green {
+  background-color: var(--persian-green);
+}
+
+.text-orange-web {
+  color: var(--orange-web);
+}
+
+.text-imperial-red {
+  color: var(--imperial-red);
+}
+
+.text-oxford-blue {
+  color: var(--oxford-blue);
+}
+
+.text-persian-green {
+  color: var(--persian-green);
+}
+
+.text-platinum {
+  color: var(--platinum) !important;
+}
+
+.text-honeydew {
+  color: var(--honeydew) !important;
+}
+
+.shadow-light {
+  box-shadow: 0 .5rem 1.5rem rgba(22,28,45,.05)!important
+}
+
+.shadow-light-lg {
+  box-shadow: 0 1.5rem 4rem rgba(22,28,45,.05)!important;
+}
+
+.shadow-dark {
+  box-shadow: 0 .5rem 1.5rem rgba(22,28,45,.15)!important
+}
+
+.shadow-dark-lg {
+  box-shadow: 0 1.5rem 4rem rgba(22,28,45,.15)!important
+}
+
+.shadow-lift {
+  box-shadow: 0 1rem 2.5rem rgba(22,28,45,.1),0 .5rem 1rem -.75rem rgba(22,28,45,.1)!important
+}
+
+@media (min-width: 576px) {
+
+}
+
+@media (min-width: 768px) {
+  .c-content {
+    padding-top: 70px;
+    padding-bottom: 70px;
+  }
+
+  .c-card {
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+@media (min-width: 992px) {
+
+}
+
+@media (min-width: 1200px) { 
+}

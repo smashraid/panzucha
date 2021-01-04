@@ -1,0 +1,48 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Log in!{% endblock %}
+
+{% block body %}
+<form method="post" class="mx-auto text-center c-form">
+    {% if error %}
+        <div class="alert alert-danger my-3">
+            {{ error.messageKey|trans(error.messageData, 'security') }}
+        </div>
+    {% endif %}
+
+    {% if app.user %}
+        <div class="alert alert-info my-3">
+            {% trans %}form.login.message.welcome{% endtrans %} {{app.user.username}}, <a href="{{ path('app_logout') }}">{% trans %}form.login.action.logout{% endtrans %}</a>
+        </div>
+    {% endif %}
+
+    {% set emailTrans = 'form.login.field.email'|trans %}
+    {% set passwordTrans = 'form.login.field.password'|trans %}
+    <img class="mb-4" src="{{asset('icons/logo5.svg')}}" alt="" width="72" height="72">
+    <h1 class="h3 mb-3 font-weight-normal text-center"> {% trans %}form.login.title{% endtrans %} </h1>
+    <label for="inputEmail" class="sr-only">{{emailTrans}}</label>
+    <input type="email" value="{{ last_username }}" name="email" id="inputEmail" class="form-control mb-2" placeholder="{{emailTrans}}" required autofocus>
+    <label for="inputPassword" class="sr-only">{{passwordTrans}}</label>
+    <input type="password" name="password" id="inputPassword" class="form-control mb-2" placeholder="{{passwordTrans}}" required>
+    
+    <input type="hidden" name="_csrf_token"
+           value="{{ csrf_token('authenticate') }}"
+    >
+
+    {#
+        Uncomment this section and add a remember_me option below your firewall to activate remember me functionality.
+        See https://symfony.com/doc/current/security/remember_me.html
+
+        <div class="checkbox mb-3">
+            <label>
+                <input type="checkbox" name="_remember_me"> Remember me
+            </label>
+        </div>
+    #}
+
+    <button class="btn btn-lg btn-primary btn-block" type="submit">
+        {% trans %}form.login.action.submit{% endtrans %}
+    </button>
+    <a class="d-block my-3" href="{{ path('app_forgot_password_request') }}">{% trans %}form.login.action.forgotpassword{% endtrans %}</a>
+</form>
+{% endblock %}
