@@ -1,16 +1,33 @@
+# Compiled Object files, Global libraries, Word lists, etc.
+*.a
+*.o
+*.6
+*.8
 
-###> symfony/framework-bundle ###
-/.env.local
-/.env.local.php
-/.env.*.local
-/config/secrets/prod/prod.decrypt.private.php
-/public/bundles/
-/var/
-/vendor/
-###< symfony/framework-bundle ###
+# Compiled binaries
+# You can also use a specific directory like bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
 
-###> symfony/phpunit-bridge ###
-.phpunit
-.phpunit.result.cache
-/phpunit.xml
-###< symfony/phpunit-bridge ###
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the # if you want to ignore vendor/)
+# vendor/
+
+# Local environment files
+.env
+.env.local
+
+# IDE/Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
