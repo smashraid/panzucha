@@ -1,5 +1,71 @@
 package main
 
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"panzucha/internal/config"
+	"panzucha/internal/handlers"
+	"panzucha/internal/repositories"
+	"panzucha/internal/server"
+	"panzucha/internal/services"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
 func main() {
-	// will wire everything later
+	// 1. Load config
+	cfg := config.Load()
+
+	// 2. Setup logger (structured)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	// 3. Database connection
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	// 4. Repository -> Service -> Handler
+	productRepo := repositories.NewProductRepository(pool)
+	productService := services.NewProductService(productRepo)
+	productHandler := handlers.NewProductHandler(productService)
+
+	// 5. Router (chi)
+	r := server.NewRouter(cfg, productHandler)
+
+	// 6. HTTP server
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	// 7. Graceful shutdown
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("shutting down server...")
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShutdown); err != nil {
+		slog.Error("forced shutdown", "error", err)
+	}
+	slog.Info("server stopped")
 }
