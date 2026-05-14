@@ -9,7 +9,7 @@ import (
 type Config struct {
 	LogstashURL string `env:"LOGSTASH_URL" envDefault:"http://localhost:8080"`
 	Environment string `env:"ENV" envDefault:"development"`
-	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://user:pass@localhost:5432/mydb?sslmode=disable"`
+	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@postgres:5432/postgres?sslmode=disable"`
 }
 
 func Load() *Config {

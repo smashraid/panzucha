@@ -8,7 +8,8 @@ import (
 	"os/signal"
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
-	"panzucha/internal/repositories"
+	repositories "panzucha/internal/repositories/postgres"
+
 	"panzucha/internal/server"
 	"panzucha/internal/services"
 	"syscall"
@@ -35,12 +36,16 @@ func main() {
 	defer pool.Close()
 
 	// 4. Repository -> Service -> Handler
-	productRepo := repositories.NewProductRepository(pool)
+	userRepo := repositories.NewPostgresUserRepository(pool)
+	userService := services.NewUserService(userRepo)
+	userHandler := handlers.NewUserHandler(userService)
+
+	productRepo := repositories.NewPostgresProductRepository(pool)
 	productService := services.NewProductService(productRepo)
 	productHandler := handlers.NewProductHandler(productService)
 
 	// 5. Router (chi)
-	r := server.NewRouter(cfg, productHandler)
+	r := server.NewRouter(cfg, productHandler, userHandler)
 
 	// 6. HTTP server
 	srv := &http.Server{
