@@ -20,7 +20,7 @@ func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 }
 
 // API Logging Helper
-func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestID, userID, clientIP, userAgent string) {
+func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestID, userID, clientIP, userAgent, message string) {
 	ms := duration.Milliseconds()
 	entry := LogEntry{
 		Category:    string(CategoryAPI),
@@ -35,6 +35,7 @@ func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int
 		UserID:      userID,
 		ClientIP:    clientIP,
 		UserAgent:   userAgent,
+		Message:     message,
 	}
 
 	level := "INFO"

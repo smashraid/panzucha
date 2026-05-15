@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
+	"panzucha/internal/logger"
 	repositories "panzucha/internal/repositories/postgres"
 
 	"panzucha/internal/server"
@@ -23,8 +24,11 @@ func main() {
 	cfg := config.Load()
 
 	// 2. Setup logger (structured)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+	stdLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(stdLogger)
+
+	log := logger.New(cfg)
+	defer log.Close()
 
 	// 3. Database connection
 	ctx := context.Background()
@@ -38,7 +42,7 @@ func main() {
 	// 4. Repository -> Service -> Handler
 	userRepo := repositories.NewPostgresUserRepository(pool)
 	userService := services.NewUserService(userRepo)
-	userHandler := handlers.NewUserHandler(userService)
+	userHandler := handlers.NewUserHandler(userService, log)
 
 	productRepo := repositories.NewPostgresProductRepository(pool)
 	productService := services.NewProductService(productRepo)

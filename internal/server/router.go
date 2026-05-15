@@ -19,8 +19,9 @@ func NewRouter(
 ) *chi.Mux {
 	r := chi.NewRouter()
 
+	r.Use(mymiddleware.RequestID)
 	// Global middlewares
-	r.Use(middleware.RequestID)
+	//r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))

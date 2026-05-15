@@ -56,14 +56,12 @@ func (s *userService) Register(ctx context.Context, email, name, password string
 
 func (s *userService) Login(ctx context.Context, email, password string) (string, error) {
 	user, err := s.repo.GetByEmail(ctx, email)
-	if err != nil {
-		return "", errors.New("invalid credentials")
-	}
-	if user == nil || !user.CheckPassword(password) {
+	if err != nil || user == nil || !user.CheckPassword(password) {
 		return "", errors.New("invalid credentials")
 	}
 
-	token, err := auth.GenerateToken(user.ID, user.Email)
+	roles := []string{user.Role}
+	token, err := auth.GenerateToken(user.ID, user.Email, roles)
 	if err != nil {
 		return "", err
 	}

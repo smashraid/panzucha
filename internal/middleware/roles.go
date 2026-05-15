@@ -14,9 +14,9 @@ func RequireRole(requiredRoles ...string) func(http.Handler) http.Handler {
 				return
 			}
 			// Check if user has at least one of the required roles
-			for _, reqRole := range requiredRoles {
-				for _, userRole := range roles {
-					if reqRole == userRole {
+			for _, rl := range roles {
+				for _, allowed := range requiredRoles {
+					if rl == allowed {
 						next.ServeHTTP(w, r)
 						return
 					}

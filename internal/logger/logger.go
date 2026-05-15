@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"panzucha/internal/config"
 	"sync"
 	"time"
 )
@@ -79,8 +80,14 @@ func (ls *LogstashSender) Close() {
 }
 
 // New creates a new logger with async sending
-func New(service, env, logstashURL string) *Logger {
-	sender := NewLogstashSender(logstashURL)
+func New(cfg *config.Config) *Logger {
+	var sender *LogstashSender
+	if cfg.LogstashURL != "" {
+		sender = NewLogstashSender(cfg.LogstashURL)
+		slog.Info("Logstash sender enabled", "url", cfg.LogstashURL)
+	} else {
+		slog.Warn("Logstash URL not set – logs will not be forwarded to ELK")
+	}
 
 	// Structured slog handler for stdout (JSON format for k8s)
 	opts := &slog.HandlerOptions{
@@ -91,8 +98,8 @@ func New(service, env, logstashURL string) *Logger {
 	return &Logger{
 		slog:    slog.New(jsonHandler),
 		sender:  sender,
-		service: service,
-		env:     env,
+		service: cfg.ServiceName,
+		env:     cfg.Environment,
 	}
 }
 

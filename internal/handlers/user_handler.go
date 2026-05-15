@@ -3,17 +3,21 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"panzucha/internal/logger"
+	"panzucha/internal/middleware"
 	"panzucha/internal/services"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type UserHandler struct {
 	service services.UserService
+	logger  *logger.Logger
 }
 
-func NewUserHandler(s services.UserService) *UserHandler {
-	return &UserHandler{service: s}
+func NewUserHandler(s services.UserService, log *logger.Logger) *UserHandler {
+	return &UserHandler{service: s, logger: log}
 }
 
 type registerRequest struct {
@@ -33,18 +37,33 @@ type updateRequest struct {
 }
 
 func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	requestID := middleware.GetRequestID(r.Context())
+
+	clientIP := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		clientIP = xff
+	}
+	userAgent := r.UserAgent()
+
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusBadRequest, time.Since(start),
+			requestID, "", clientIP, userAgent, "invalid json")
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	user, err := h.service.Register(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
+		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusBadRequest, time.Since(start),
+			requestID, "", clientIP, userAgent, err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusCreated, time.Since(start),
+		requestID, user.ID, clientIP, userAgent, "user registered")
 	respondJSON(w, http.StatusCreated, user)
 }
 
