@@ -12,8 +12,8 @@ import (
 )
 
 type Logger struct {
-	slog    *slog.Logger
-	sender  *LogstashSender
+	slog *slog.Logger
+	// sender  *LogstashSender
 	service string
 	env     string
 }
@@ -81,13 +81,13 @@ func (ls *LogstashSender) Close() {
 
 // New creates a new logger with async sending
 func New(cfg *config.Config) *Logger {
-	var sender *LogstashSender
-	if cfg.LogstashURL != "" {
-		sender = NewLogstashSender(cfg.LogstashURL)
-		slog.Info("Logstash sender enabled", "url", cfg.LogstashURL)
-	} else {
-		slog.Warn("Logstash URL not set – logs will not be forwarded to ELK")
-	}
+	// var sender *LogstashSender
+	// if cfg.LogstashURL != "" {
+	// 	sender = NewLogstashSender(cfg.LogstashURL)
+	// 	slog.Info("Logstash sender enabled", "url", cfg.LogstashURL)
+	// } else {
+	// 	slog.Warn("Logstash URL not set – logs will not be forwarded to ELK")
+	// }
 
 	// Structured slog handler for stdout (JSON format for k8s)
 	opts := &slog.HandlerOptions{
@@ -96,15 +96,15 @@ func New(cfg *config.Config) *Logger {
 	jsonHandler := slog.NewJSONHandler(os.Stdout, opts)
 
 	return &Logger{
-		slog:    slog.New(jsonHandler),
-		sender:  sender,
+		slog: slog.New(jsonHandler),
+		// sender:  sender,
 		service: cfg.ServiceName,
 		env:     cfg.Environment,
 	}
 }
 
-func (l *Logger) Close() {
-	if l.sender != nil {
-		l.sender.Close()
-	}
-}
+// func (l *Logger) Close() {
+// 	if l.sender != nil {
+// 		l.sender.Close()
+// 	}
+// }

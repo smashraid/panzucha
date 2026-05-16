@@ -18,9 +18,9 @@ func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 	l.slog.Log(ctx, parseLevel(level), entry.Message, "entry", entry)
 
 	// Async send to Logstash
-	if l.sender != nil {
-		l.sender.Send(entry)
-	}
+	// if l.sender != nil {
+	// 	l.sender.Send(entry)
+	// }
 }
 
 // LogAPI records an HTTP API request/response.

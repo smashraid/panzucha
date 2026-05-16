@@ -68,18 +68,33 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	requestID := middleware.GetRequestID(r.Context())
+
+	clientIP := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		clientIP = xff
+	}
+	userAgent := r.UserAgent()
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusBadRequest, time.Since(start),
+			requestID, "", clientIP, userAgent, err, "invalid json", nil)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	token, err := h.service.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusUnauthorized, time.Since(start),
+			requestID, "", clientIP, userAgent, err, err.Error(), req)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
+	h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusOK, time.Since(start),
+		requestID, "", clientIP, userAgent, nil, "user logged in", req)
 	respondJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 

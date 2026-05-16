@@ -28,7 +28,7 @@ func main() {
 	slog.SetDefault(stdLogger)
 
 	log := logger.New(cfg)
-	defer log.Close()
+	// defer log.Close()
 
 	// 3. Database connection
 	ctx := context.Background()
@@ -40,8 +40,8 @@ func main() {
 	defer pool.Close()
 
 	// 4. Repository -> Service -> Handler
-	userRepo := repositories.NewPostgresUserRepository(pool)
-	userService := services.NewUserService(userRepo)
+	userRepo := repositories.NewPostgresUserRepository(pool, log)
+	userService := services.NewUserService(userRepo, log)
 	userHandler := handlers.NewUserHandler(userService, log)
 
 	productRepo := repositories.NewPostgresProductRepository(pool)
