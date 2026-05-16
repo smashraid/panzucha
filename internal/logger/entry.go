@@ -38,6 +38,7 @@ type LogEntry struct {
 	Error      string `json:"error,omitempty"`
 	ErrorStack string `json:"error_stack,omitempty"`
 
+	RequestPayload any `json:"request_payload,omitempty"`
 	// Additional custom fields
-	Custom map[string]interface{} `json:"custom,omitempty"`
+	Custom map[string]any `json:"custom,omitempty"`
 }

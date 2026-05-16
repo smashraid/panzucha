@@ -104,5 +104,7 @@ func New(cfg *config.Config) *Logger {
 }
 
 func (l *Logger) Close() {
-	l.sender.Close()
+	if l.sender != nil {
+		l.sender.Close()
+	}
 }

@@ -3,6 +3,8 @@ package logger
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -16,11 +18,14 @@ func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 	l.slog.Log(ctx, parseLevel(level), entry.Message, "entry", entry)
 
 	// Async send to Logstash
-	l.sender.Send(entry)
+	if l.sender != nil {
+		l.sender.Send(entry)
+	}
 }
 
-// API Logging Helper
-func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestID, userID, clientIP, userAgent, message string) {
+// LogAPI records an HTTP API request/response.
+// If err is not nil, the log is marked as ERROR and includes error details + stack trace.
+func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestID, userID, clientIP, userAgent string, err error, message string, payload any) {
 	ms := duration.Milliseconds()
 	entry := LogEntry{
 		Category:    string(CategoryAPI),
@@ -35,16 +40,31 @@ func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int
 		UserID:      userID,
 		ClientIP:    clientIP,
 		UserAgent:   userAgent,
-		Message:     message,
 	}
 
 	level := "INFO"
-	if statusCode >= 400 {
+	if statusCode >= 400 || err != nil {
 		level = "ERROR"
-		entry.Message = "API request failed"
+		entry.Message = message
+		if err != nil {
+			entry.Error = err.Error()
+			// Capture stack trace for internal errors (500)
+			if statusCode >= 500 {
+				// Clean up the stack (remove logger internal frames)
+				stack := string(debug.Stack())
+				lines := strings.Split(stack, "\n")
+				// Keep only frames after the logger call (simplified)
+				entry.ErrorStack = strings.Join(lines, "\n")
+			}
+		}
 	} else {
-		entry.Message = "API request completed"
+		entry.Message = message
 	}
+
+	if payload != nil && l.env == "development" { // only in dev, or based on header
+		entry.RequestPayload = payload
+	}
+
 	l.log(ctx, level, entry)
 }
 
@@ -90,13 +110,13 @@ func (l *Logger) LogBusiness(ctx context.Context, subCategory, entityType, entit
 }
 
 // Request/Response Payload Logging (debug only, be careful with sensitive data)
-func (l *Logger) LogRequestPayload(ctx context.Context, method, path string, payload interface{}) {
+func (l *Logger) LogRequestPayload(ctx context.Context, method, path string, payload any) {
 	entry := LogEntry{
 		Category:    string(CategoryAPI),
 		SubCategory: string(SubAPIRequest),
 		HTTPMethod:  method,
 		HTTPPath:    path,
-		Custom:      map[string]interface{}{"payload": payload},
+		Custom:      map[string]any{"payload": payload},
 		Message:     "API request payload",
 	}
 	l.log(ctx, "DEBUG", entry)

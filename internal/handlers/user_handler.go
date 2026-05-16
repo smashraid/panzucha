@@ -49,7 +49,7 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusBadRequest, time.Since(start),
-			requestID, "", clientIP, userAgent, "invalid json")
+			requestID, "", clientIP, userAgent, err, "invalid json", nil)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -57,13 +57,13 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user, err := h.service.Register(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
 		h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusBadRequest, time.Since(start),
-			requestID, "", clientIP, userAgent, err.Error())
+			requestID, "", clientIP, userAgent, err, err.Error(), req)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	h.logger.LogAPI(r.Context(), r.Method, r.URL.Path, http.StatusCreated, time.Since(start),
-		requestID, user.ID, clientIP, userAgent, "user registered")
+		requestID, user.ID, clientIP, userAgent, nil, "user registered", req)
 	respondJSON(w, http.StatusCreated, user)
 }
 
