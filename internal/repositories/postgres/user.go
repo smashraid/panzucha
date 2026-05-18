@@ -51,18 +51,20 @@ func (r *PostgresUserRepository) GetByID(ctx context.Context, id string) (*domai
 	)
 	duration := time.Since(start)
 	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected = 1
-	} else if errors.Is(err, sql.ErrNoRows) {
+
+	if errors.Is(err, sql.ErrNoRows) {
 		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
 		return nil, nil
 	}
 
-	r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, err)
-
 	if err != nil {
+		rowsAffected = 1
+		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, err)
 		return nil, err
 	}
+
+	rowsAffected = 1
+	r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
 	return &u, nil
 }
 
