@@ -44,9 +44,9 @@ func main() {
 	userService := services.NewUserService(userRepo, log)
 	userHandler := handlers.NewUserHandler(userService, log)
 
-	productRepo := repositories.NewPostgresProductRepository(pool)
-	productService := services.NewProductService(productRepo)
-	productHandler := handlers.NewProductHandler(productService)
+	productRepo := repositories.NewPostgresProductRepository(pool, log)
+	productService := services.NewProductService(productRepo, log)
+	productHandler := handlers.NewProductHandler(productService, log)
 
 	// 5. Router (chi)
 	r := server.NewRouter(cfg, productHandler, userHandler)

@@ -3,17 +3,16 @@ package domain
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 )
 
 type Product struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name" validate:"required"`
-	Price     float64   `json:"price" validate:"gt=0"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID    string  `json:"id"`
+	Name  string  `json:"name" validate:"required"`
+	Price float64 `json:"price" validate:"gt=0"`
+	// CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt time.Time `json:"updated_at"`
 }
 
 func NewProductID() string {

@@ -28,15 +28,15 @@ func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Produc
 		p.ID = domain.NewProductID()
 	}
 
-	err := r.pool.QueryRow(ctx,
-		"INSERT INTO products (id, name, price) VALUES ($1, $2, $3) RETURNING id",
+	result, err := r.pool.Exec(ctx,
+		"INSERT INTO products (id, name, price) VALUES ($1, $2, $3)",
 		p.ID, p.Name, p.Price,
-	).Scan(&p.ID)
+	)
 
 	duration := time.Since(start)
 	rowsAffected := int64(0)
 	if err == nil {
-		rowsAffected = 1
+		rowsAffected = result.RowsAffected()
 	}
 
 	r.logger.LogDB(ctx, "db_insert", "products", duration, rowsAffected, err)
@@ -113,10 +113,20 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 	for rows.Next() {
 		var p domain.Product
 		if err := rows.Scan(&p.ID, &p.Name, &p.Price); err != nil {
+			duration = time.Since(start)
+			rowsAffected = int64(len(products))
+			r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
 			return nil, err
 		}
 		products = append(products, p)
-		rowsAffected += 1
+	}
+
+	duration = time.Since(start)
+	rowsAffected = int64(len(products))
+
+	if err := rows.Err(); err != nil {
+		r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
+		return nil, err
 	}
 
 	r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, nil)

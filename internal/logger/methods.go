@@ -8,6 +8,39 @@ import (
 	"time"
 )
 
+type APILogParams struct {
+	Ctx        context.Context
+	Method     string
+	Path       string
+	StatusCode int
+	Duration   time.Duration
+	RequestID  string
+	UserID     string
+	ClientIP   string
+	UserAgent  string
+	Err        error
+	Message    string
+	Payload    any
+}
+
+type DBLogParams struct {
+	Ctx          context.Context
+	Operation    string
+	Table        string
+	Duration     time.Duration
+	RowsAffected int64
+	Err          error
+}
+
+type BusinessLogParams struct {
+	Ctx         context.Context
+	SubCategory string
+	EntityType  string
+	EntityID    string
+	Message     string
+	Err         error
+}
+
 func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 	// Set defaults
 	entry.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
@@ -25,31 +58,31 @@ func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 
 // LogAPI records an HTTP API request/response.
 // If err is not nil, the log is marked as ERROR and includes error details + stack trace.
-func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestID, userID, clientIP, userAgent string, err error, message string, payload any) {
-	ms := duration.Milliseconds()
+func (l *Logger) LogAPI(params APILogParams) {
+	ms := params.Duration.Milliseconds()
 	entry := LogEntry{
 		Category:    string(CategoryAPI),
 		SubCategory: string(SubAPIResponse),
-		HTTPMethod:  method,
-		HTTPPath:    path,
-		HTTPStatus:  statusCode,
-		StatusCat:   GetStatusCategory(statusCode),
+		HTTPMethod:  params.Method,
+		HTTPPath:    params.Path,
+		HTTPStatus:  params.StatusCode,
+		StatusCat:   GetStatusCategory(params.StatusCode),
 		DurationMs:  ms,
 		Performance: GetPerformanceBucket(ms),
-		RequestID:   requestID,
-		UserID:      userID,
-		ClientIP:    clientIP,
-		UserAgent:   userAgent,
+		RequestID:   params.RequestID,
+		UserID:      params.UserID,
+		ClientIP:    params.ClientIP,
+		UserAgent:   params.UserAgent,
 	}
 
 	level := "INFO"
-	if statusCode >= 400 || err != nil {
+	if params.StatusCode >= 400 || params.Err != nil {
 		level = "ERROR"
-		entry.Message = message
-		if err != nil {
-			entry.Error = err.Error()
+		entry.Message = params.Message
+		if params.Err != nil {
+			entry.Error = params.Err.Error()
 			// Capture stack trace for internal errors (500)
-			if statusCode >= 500 {
+			if params.StatusCode >= 500 {
 				// Clean up the stack (remove logger internal frames)
 				stack := string(debug.Stack())
 				lines := strings.Split(stack, "\n")
@@ -58,55 +91,55 @@ func (l *Logger) LogAPI(ctx context.Context, method, path string, statusCode int
 			}
 		}
 	} else {
-		entry.Message = message
+		entry.Message = params.Message
 	}
 
-	if payload != nil && l.env == "development" { // only in dev, or based on header
-		entry.RequestPayload = payload
+	if params.Payload != nil && l.env == "development" { // only in dev, or based on header
+		entry.RequestPayload = params.Payload
 	}
 
-	l.log(ctx, level, entry)
+	l.log(params.Ctx, level, entry)
 }
 
 // Database Logging Helper
-func (l *Logger) LogDB(ctx context.Context, operation, table string, duration time.Duration, rowsAffected int64, err error) {
-	ms := duration.Milliseconds()
+func (l *Logger) LogDB(params DBLogParams) {
+	ms := params.Duration.Milliseconds()
 	entry := LogEntry{
 		Category:       string(CategoryDatabase),
-		SubCategory:    operation, // db_select, db_insert, etc.
-		DBOperation:    operation,
-		DBTable:        table,
+		SubCategory:    params.Operation,
+		DBOperation:    params.Operation,
+		DBTable:        params.Table,
 		DurationMs:     ms,
 		Performance:    GetPerformanceBucket(ms),
-		DBRowsAffected: rowsAffected,
+		DBRowsAffected: params.RowsAffected,
 	}
 
 	level := "INFO"
 	entry.Message = "Database operation completed"
-	if err != nil {
+	if params.Err != nil {
 		level = "ERROR"
 		entry.Message = "Database operation failed"
-		entry.Error = err.Error()
+		entry.Error = params.Err.Error()
 	}
-	l.log(ctx, level, entry)
+	l.log(params.Ctx, level, entry)
 }
 
 // Business Logging Helper
-func (l *Logger) LogBusiness(ctx context.Context, subCategory, entityType, entityID, message string, err error) {
+func (l *Logger) LogBusiness(params BusinessLogParams) {
 	entry := LogEntry{
 		Category:    string(CategoryBusiness),
-		SubCategory: subCategory,
-		EntityType:  entityType,
-		EntityID:    entityID,
-		Message:     message,
+		SubCategory: params.SubCategory,
+		EntityType:  params.EntityType,
+		EntityID:    params.EntityID,
+		Message:     params.Message,
 	}
 
 	level := "INFO"
-	if err != nil {
+	if params.Err != nil {
 		level = "ERROR"
-		entry.Error = err.Error()
+		entry.Error = params.Err.Error()
 	}
-	l.log(ctx, level, entry)
+	l.log(params.Ctx, level, entry)
 }
 
 // Request/Response Payload Logging (debug only, be careful with sensitive data)

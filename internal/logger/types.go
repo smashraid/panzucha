@@ -59,3 +59,36 @@ func GetPerformanceBucket(durationMs int64) string {
 		return "Critical"
 	}
 }
+
+// Database operation constants
+const (
+	DBSelect = "db_select"
+	DBInsert = "db_insert"
+	DBUpdate = "db_update"
+	DBDelete = "db_delete"
+)
+
+// API message constants (already discussed)
+const (
+	MsgInvalidJSON      = "invalid JSON"
+	MsgValidationFailed = "validation failed"
+	MsgCreated          = "resource created"
+	MsgUpdated          = "resource updated"
+	MsgDeleted          = "resource deleted"
+	MsgRetrieved        = "resource retrieved"
+	MsgListed           = "resources listed"
+	MsgInternalError    = "internal server error"
+	MsgNotFound         = "resource not found"
+	MsgUnauthorized     = "unauthorized access"
+	MsgForbidden        = "access forbidden"
+)
+
+// Business sub‑category constants (optional but recommended)
+const (
+	BusinessProductCreate = "product_creation"
+	BusinessProductUpdate = "product_update"
+	BusinessProductDelete = "product_delete"
+	BusinessProductGet    = "product_get"
+	BusinessProductList   = "product_list"
+	// similar for user, order, etc.
+)
