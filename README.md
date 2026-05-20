@@ -29,7 +29,7 @@ We built a modular API using **clean architecture** and **dependency injection**
 - **No voodoo** – All code is explicit, easy to trace, and logs exactly what happens.
 
 ## Architecture
-
+```mermaid
 %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#1e293b', 'primaryTextColor': '#ffffff', 'primaryBorderColor': '#475569', 'lineColor': '#64748b', 'background': '#0f172a'}}}%%
 flowchart TB
 
@@ -96,7 +96,7 @@ flowchart TB
   class Repo,PG storage;
   class LoggerPkg,Splunk logs;
   class Prometheus,Grafana,Jaeger metrics;
-
+```
 
 Data flow:
 
