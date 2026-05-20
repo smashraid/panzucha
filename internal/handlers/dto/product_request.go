@@ -6,6 +6,6 @@ type CreateProductRequest struct {
 }
 
 type UpdateProductRequest struct {
-	Name  string  `json:"name" validate:"omitempty,max=100"`
+	Name  string  `json:"name" validate:"omitempty,min=1"`
 	Price float64 `json:"price" validate:"omitempty,gt=0"`
 }

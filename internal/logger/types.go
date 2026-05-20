@@ -70,25 +70,34 @@ const (
 
 // API message constants (already discussed)
 const (
-	MsgInvalidJSON      = "invalid JSON"
-	MsgValidationFailed = "validation failed"
-	MsgCreated          = "resource created"
-	MsgUpdated          = "resource updated"
-	MsgDeleted          = "resource deleted"
-	MsgRetrieved        = "resource retrieved"
-	MsgListed           = "resources listed"
-	MsgInternalError    = "internal server error"
-	MsgNotFound         = "resource not found"
-	MsgUnauthorized     = "unauthorized access"
-	MsgForbidden        = "access forbidden"
+	MsgBusinessInvalidJSON       = "invalid JSON"
+	MsgBusinessValidationFailed  = "validation failed"
+	MsgBusinessCreated           = "resource created"
+	MsgBusinessUpdated           = "resource updated"
+	MsgBusinessDeleted           = "resource deleted"
+	MsgBusinessRetrieved         = "resource retrieved"
+	MsgBusinessListed            = "resources listed"
+	MsgBusinessInternalError     = "internal server error"
+	MsgBusinessUnauthorized      = "unauthorized access"
+	MsgBusinessForbidden         = "access forbidden"
+	MsgBusinessCreateFailed      = "failed to create resource"
+	MsgBusinessUpdateFailed      = "failed to update resource"
+	MsgBusinessDeleteFailed      = "failed to delete resource"
+	MsgBusinessGetFailed         = "failed to get resource"
+	MsgBusinessListFailed        = "failed to list resources"
+	MsgBusinessNotFound          = "resource not found"
+	MsgBusinessDatabaseError     = "database error"
+	MsgBusinessSuccess           = "operation completed successfully"
+	MsgBusinessInvalidIdentifier = "invalid resource identifier"
 )
 
 // Business sub‑category constants (optional but recommended)
 const (
-	BusinessProductCreate = "product_creation"
-	BusinessProductUpdate = "product_update"
-	BusinessProductDelete = "product_delete"
-	BusinessProductGet    = "product_get"
-	BusinessProductList   = "product_list"
+	BusinessEntityCreate = "entity_creation"
+	BusinessEntityUpdate = "entity_update"
+	BusinessEntityDelete = "entity_delete"
+	BusinessEntityGet    = "entity_get"
+	BusinessEntityList   = "entity_list"
+	BusinessExistEntity  = "entity_exist"
 	// similar for user, order, etc.
 )

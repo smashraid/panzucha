@@ -21,3 +21,12 @@ func FromDomainToResponse(p *domain.Product) *dto.ProductResponse {
 		Price: p.Price,
 	}
 }
+
+// FromUpdateProductRequest converts update request DTO to domain model.
+// Note: ID is not set here – it will be set by the handler from URL param.
+func FromUpdateProductRequest(req *dto.UpdateProductRequest) *domain.Product {
+	return &domain.Product{
+		Name:  req.Name,
+		Price: req.Price,
+	}
+}

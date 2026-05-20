@@ -28,8 +28,8 @@ func (r *PostgresUserRepository) Create(ctx context.Context, u *domain.User) err
 		u.ID = domain.NewUserID()
 	}
 	query := `
-        INSERT INTO users (id, email, name, password, role, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO users (id, email, name, password)
+		VALUES ($1, $2, $3, $4)
     `
 	result, err := r.pool.Exec(ctx, query, u.ID, u.Email, u.Name, u.Password)
 	duration := time.Since(start)
@@ -37,7 +37,15 @@ func (r *PostgresUserRepository) Create(ctx context.Context, u *domain.User) err
 	if err == nil {
 		rowsAffected = result.RowsAffected()
 	}
-	r.logger.LogDB(ctx, "db_insert", "users", duration, rowsAffected, err)
+
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBInsert,
+		Table:        "users",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+	})
 	return err
 }
 
@@ -53,17 +61,38 @@ func (r *PostgresUserRepository) GetByID(ctx context.Context, id string) (*domai
 	rowsAffected := int64(0)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "users",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          nil,
+		})
 		return nil, nil
 	}
 
 	if err != nil {
-		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, err)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "users",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          err,
+		})
 		return nil, err
 	}
 
 	rowsAffected = 1
-	r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBSelect,
+		Table:        "users",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          nil,
+	})
 	return &u, nil
 }
 
@@ -80,18 +109,38 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 	rowsAffected := int64(0)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "users",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          nil,
+		})
 		return nil, nil
 	}
 
 	if err != nil {
-		r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, err)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "users",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          err,
+		})
 		return nil, err
 	}
 
 	rowsAffected = 1
-	r.logger.LogDB(ctx, "db_select", "users", duration, rowsAffected, nil)
-
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBSelect,
+		Table:        "users",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          nil,
+	})
 	return &u, nil
 }
 
@@ -99,7 +148,7 @@ func (r *PostgresUserRepository) Update(ctx context.Context, u *domain.User) err
 	start := time.Now()
 	result, err := r.pool.Exec(ctx,
 		`UPDATE users SET email=$1, name=$2, role=$3, updated_at=$4 WHERE id=$5`,
-		u.Email, u.Name, u.ID)
+		u.Email, u.Name, u.Role, time.Now(), u.ID)
 	duration := time.Since(start)
 	rowsAffected := int64(0)
 
@@ -107,6 +156,13 @@ func (r *PostgresUserRepository) Update(ctx context.Context, u *domain.User) err
 		rowsAffected = result.RowsAffected()
 	}
 
-	r.logger.LogDB(ctx, "db_update", "users", duration, rowsAffected, err)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBUpdate,
+		Table:        "users",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+	})
 	return err
 }

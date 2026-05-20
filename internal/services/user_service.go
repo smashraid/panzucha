@@ -26,7 +26,6 @@ func NewUserService(repo domain.UserRepository, log *logger.Logger) UserService 
 }
 
 func (s *userService) Register(ctx context.Context, email, name, password string) (*domain.User, error) {
-	// Check if user already exists
 	existing, _ := s.repo.GetByEmail(ctx, email)
 	if existing != nil {
 		return nil, errors.New("email already registered")
@@ -42,23 +41,49 @@ func (s *userService) Register(ctx context.Context, email, name, password string
 		UpdatedAt: time.Now().UTC(),
 	}
 
-	// Validate and hash password
 	if err := user.ValidateForCreate(); err != nil {
-		s.logger.LogBusiness(ctx, "user_registration", "user", user.ID, err.Error(), err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityCreate,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     logger.MsgBusinessValidationFailed,
+			Err:         err,
+		})
 		return nil, err
 	}
 	if err := user.HashPassword(); err != nil {
-		s.logger.LogBusiness(ctx, "user_registration", "user", user.ID, "failed to hash password", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityCreate,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     "failed to hash password",
+			Err:         err,
+		})
 		return nil, err
 	}
 
-	// Save to database
 	if err := s.repo.Create(ctx, user); err != nil {
-		s.logger.LogBusiness(ctx, "user_registration", "user", user.ID, "database create failed", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityCreate,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     logger.MsgBusinessCreateFailed,
+			Err:         err,
+		})
 		return nil, err
 	}
 
-	s.logger.LogBusiness(ctx, "user_registration", "user", user.ID, "user registered successfully", nil)
+	s.logger.LogBusiness(logger.BusinessLogParams{
+		Ctx:         ctx,
+		SubCategory: logger.BusinessEntityCreate,
+		EntityType:  "user",
+		EntityID:    user.ID,
+		Message:     logger.MsgBusinessCreated,
+		Err:         nil,
+	})
 	user.Password = ""
 	return user, nil
 }
@@ -66,37 +91,87 @@ func (s *userService) Register(ctx context.Context, email, name, password string
 func (s *userService) Login(ctx context.Context, email, password string) (string, error) {
 	user, err := s.repo.GetByEmail(ctx, email)
 	if err != nil || user == nil {
-		s.logger.LogBusiness(ctx, "user_login", "user", "", "user not found or db error", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityGet,
+			EntityType:  "user",
+			EntityID:    email,
+			Message:     logger.MsgBusinessNotFound,
+			Err:         err,
+		})
 		return "", errors.New("invalid credentials")
 	}
 
 	if !user.CheckPassword(password) {
-		s.logger.LogBusiness(ctx, "user_login", "user", user.ID, "invalid password", nil)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityGet,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     "invalid password",
+			Err:         nil,
+		})
 		return "", errors.New("invalid credentials")
 	}
 
 	roles := []string{user.Role}
 	token, err := auth.GenerateToken(user.ID, user.Email, roles)
 	if err != nil {
-		s.logger.LogBusiness(ctx, "user_login", "user", user.ID, "token generation failed", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityGet,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     "token generation failed",
+			Err:         err,
+		})
 		return "", err
 	}
 
-	s.logger.LogBusiness(ctx, "user_login", "user", user.ID, "user logged in successfully", nil)
+	s.logger.LogBusiness(logger.BusinessLogParams{
+		Ctx:         ctx,
+		SubCategory: logger.BusinessEntityGet,
+		EntityType:  "user",
+		EntityID:    user.ID,
+		Message:     "user logged in successfully",
+		Err:         nil,
+	})
 	return token, nil
 }
 
 func (s *userService) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	user, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		s.logger.LogBusiness(ctx, "user_get", "user", id, "database error", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityGet,
+			EntityType:  "user",
+			EntityID:    user.ID,
+			Message:     logger.MsgBusinessDatabaseError,
+			Err:         err,
+		})
 		return nil, err
 	}
 	if user == nil {
-		s.logger.LogBusiness(ctx, "user_get", "user", id, "user not found", nil)
-		return nil, errors.New("user not found")
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityGet,
+			EntityType:  "user",
+			EntityID:    id,
+			Message:     logger.MsgBusinessNotFound,
+			Err:         nil,
+		})
+		return nil, errors.New(logger.MsgBusinessNotFound)
 	}
-	s.logger.LogBusiness(ctx, "user_get", "user", id, "user retrieved", nil)
+
+	s.logger.LogBusiness(logger.BusinessLogParams{
+		Ctx:         ctx,
+		SubCategory: logger.BusinessEntityGet,
+		EntityType:  "user",
+		EntityID:    user.ID,
+		Message:     logger.MsgBusinessGetFailed,
+		Err:         nil,
+	})
 	user.Password = ""
 	return user, nil
 }
@@ -104,7 +179,7 @@ func (s *userService) GetByID(ctx context.Context, id string) (*domain.User, err
 func (s *userService) Update(ctx context.Context, id, email, name string) (*domain.User, error) {
 	user, err := s.repo.GetByID(ctx, id)
 	if err != nil || user == nil {
-		return nil, errors.New("user not found")
+		return nil, errors.New(logger.MsgBusinessNotFound)
 	}
 
 	oldEmail := user.Email
@@ -113,17 +188,46 @@ func (s *userService) Update(ctx context.Context, id, email, name string) (*doma
 	user.Name = name
 
 	if err := user.ValidateForUpdate(); err != nil {
-		s.logger.LogBusiness(ctx, "user_update", "user", id, "user not found or db error", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityUpdate,
+			EntityType:  "user",
+			EntityID:    id,
+			Message:     logger.MsgBusinessValidationFailed,
+			Err:         err,
+		})
 		return nil, err
 	}
 
 	if err := s.repo.Update(ctx, user); err != nil {
-		s.logger.LogBusiness(ctx, "user_update", "user", id, "database update failed", err)
+		s.logger.LogBusiness(logger.BusinessLogParams{
+			Ctx:         ctx,
+			SubCategory: logger.BusinessEntityUpdate,
+			EntityType:  "user",
+			EntityID:    id,
+			Message:     logger.MsgBusinessUpdateFailed,
+			Err:         err,
+		})
 		return nil, err
 	}
 
-	s.logger.LogBusiness(ctx, "user_update", "user", id,
-		"user updated (email: "+oldEmail+"→"+email+", name: "+oldName+"→"+name+")", nil)
+	s.logger.LogBusiness(logger.BusinessLogParams{
+		Ctx:         ctx,
+		SubCategory: logger.BusinessEntityUpdate,
+		EntityType:  "user",
+		EntityID:    id,
+		Message:     "Data Updated (email: " + oldEmail + "→" + email + ", name: " + oldName + "→" + name + ")",
+		Err:         nil,
+	})
+
+	s.logger.LogBusiness(logger.BusinessLogParams{
+		Ctx:         ctx,
+		SubCategory: logger.BusinessEntityUpdate,
+		EntityType:  "user",
+		EntityID:    id,
+		Message:     logger.MsgBusinessUpdated,
+		Err:         nil,
+	})
 	user.Password = ""
 	return user, nil
 }

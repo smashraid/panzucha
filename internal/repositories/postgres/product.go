@@ -39,7 +39,14 @@ func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Produc
 		rowsAffected = result.RowsAffected()
 	}
 
-	r.logger.LogDB(ctx, "db_insert", "products", duration, rowsAffected, err)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBInsert,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+	})
 	return err
 }
 
@@ -54,17 +61,38 @@ func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*do
 	rowsAffected := int64(0)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, nil)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "products",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          nil,
+		})
 		return nil, nil
 	}
 
 	if err != nil {
-		r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "products",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          err,
+		})
 		return nil, err
 	}
 
 	rowsAffected = 1
-	r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, nil)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBSelect,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          nil,
+	})
 	return &p, nil
 }
 
@@ -78,7 +106,14 @@ func (r *PostgresProductRepository) Delete(ctx context.Context, id string) error
 		rowsAffected = result.RowsAffected()
 	}
 
-	r.logger.LogDB(ctx, "db_delete", "products", duration, rowsAffected, err)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBDelete,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+	})
 	return err
 }
 
@@ -94,7 +129,14 @@ func (r *PostgresProductRepository) Update(ctx context.Context, p *domain.Produc
 		rowsAffected = result.RowsAffected()
 	}
 
-	r.logger.LogDB(ctx, "db_update", "products", duration, rowsAffected, err)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBUpdate,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+	})
 	return err
 }
 
@@ -105,7 +147,14 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 	rowsAffected := int64(0)
 
 	if err != nil {
-		r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "products",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          err,
+		})
 		return nil, err
 	}
 	defer rows.Close()
@@ -115,7 +164,14 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 		if err := rows.Scan(&p.ID, &p.Name, &p.Price); err != nil {
 			duration = time.Since(start)
 			rowsAffected = int64(len(products))
-			r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
+			r.logger.LogDB(logger.DBLogParams{
+				Ctx:          ctx,
+				Operation:    logger.DBSelect,
+				Table:        "products",
+				Duration:     duration,
+				RowsAffected: rowsAffected,
+				Err:          err,
+			})
 			return nil, err
 		}
 		products = append(products, p)
@@ -125,10 +181,24 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 	rowsAffected = int64(len(products))
 
 	if err := rows.Err(); err != nil {
-		r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, err)
+		r.logger.LogDB(logger.DBLogParams{
+			Ctx:          ctx,
+			Operation:    logger.DBSelect,
+			Table:        "products",
+			Duration:     duration,
+			RowsAffected: rowsAffected,
+			Err:          err,
+		})
 		return nil, err
 	}
 
-	r.logger.LogDB(ctx, "db_select", "products", duration, rowsAffected, nil)
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBSelect,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          nil,
+	})
 	return products, nil
 }
