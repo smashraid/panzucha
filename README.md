@@ -134,6 +134,7 @@ flowchart TB
   class Repo,PG storage;
   class LoggerPkg,Splunk logs;
   class Prometheus,Grafana,Jaeger metrics;
+```
 
 Data flow:
 
