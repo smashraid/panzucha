@@ -28,9 +28,13 @@ func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Produc
 		p.ID = domain.NewProductID()
 	}
 
+	now := time.Now().UTC()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+	query := `INSERT INTO products (id, name, price, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`
 	result, err := r.pool.Exec(ctx,
-		"INSERT INTO products (id, name, price) VALUES ($1, $2, $3)",
-		p.ID, p.Name, p.Price,
+		query,
+		p.ID, p.Name, p.Price, p.CreatedAt, p.UpdatedAt,
 	)
 
 	duration := time.Since(start)
@@ -46,6 +50,10 @@ func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Produc
 		Duration:     duration,
 		RowsAffected: rowsAffected,
 		Err:          err,
+		Custom: map[string]any{
+			"method": "create",
+			"query":  query,
+		},
 	})
 	return err
 }
@@ -53,8 +61,9 @@ func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Produc
 func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*domain.Product, error) {
 	start := time.Now()
 	var p domain.Product
+	query := `SELECT id, name, price FROM products WHERE id=$1`
 	err := r.pool.QueryRow(ctx,
-		"SELECT id, name, price FROM products WHERE id=$1",
+		query,
 		id,
 	).Scan(&p.ID, &p.Name, &p.Price)
 	duration := time.Since(start)
@@ -68,6 +77,10 @@ func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*do
 			Duration:     duration,
 			RowsAffected: rowsAffected,
 			Err:          nil,
+			Custom: map[string]any{
+				"method": "get_by_id",
+				"query":  query,
+			},
 		})
 		return nil, nil
 	}
@@ -80,6 +93,10 @@ func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*do
 			Duration:     duration,
 			RowsAffected: rowsAffected,
 			Err:          err,
+			Custom: map[string]any{
+				"method": "get_by_id",
+				"query":  query,
+			},
 		})
 		return nil, err
 	}
@@ -92,13 +109,18 @@ func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*do
 		Duration:     duration,
 		RowsAffected: rowsAffected,
 		Err:          nil,
+		Custom: map[string]any{
+			"method": "get_by_id",
+			"query":  query,
+		},
 	})
 	return &p, nil
 }
 
 func (r *PostgresProductRepository) Delete(ctx context.Context, id string) error {
 	start := time.Now()
-	result, err := r.pool.Exec(ctx, "DELETE FROM products WHERE id = $1", id)
+	query := `DELETE FROM products WHERE id = $1`
+	result, err := r.pool.Exec(ctx, query, id)
 	duration := time.Since(start)
 	rowsAffected := int64(0)
 
@@ -113,15 +135,29 @@ func (r *PostgresProductRepository) Delete(ctx context.Context, id string) error
 		Duration:     duration,
 		RowsAffected: rowsAffected,
 		Err:          err,
+		Custom: map[string]any{
+			"method": "delete",
+			"query":  query,
+		},
 	})
-	return err
+
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New(logger.MsgBusinessNotFound)
+	}
+	return nil
 }
 
 func (r *PostgresProductRepository) Update(ctx context.Context, p *domain.Product) error {
 	start := time.Now()
+	now := time.Now().UTC()
+	p.UpdatedAt = now
+	query := `UPDATE products SET name = $1, price = $2, updated_at = $3 WHERE id = $4`
 	result, err := r.pool.Exec(ctx,
-		"UPDATE products SET name = $1, price = $2 WHERE id = $3",
-		p.Name, p.Price, p.ID)
+		query,
+		p.Name, p.Price, p.UpdatedAt, p.ID)
 	duration := time.Since(start)
 	rowsAffected := int64(0)
 
@@ -136,13 +172,27 @@ func (r *PostgresProductRepository) Update(ctx context.Context, p *domain.Produc
 		Duration:     duration,
 		RowsAffected: rowsAffected,
 		Err:          err,
+		Custom: map[string]any{
+			"method": "update",
+			"query":  query,
+		},
 	})
-	return err
+
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return errors.New(logger.MsgBusinessNotFound)
+	}
+
+	return nil
 }
 
 func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product, error) {
 	start := time.Now()
-	rows, err := r.pool.Query(ctx, "SELECT id, name, price FROM products")
+	query := `SELECT id, name, price FROM products`
+	rows, err := r.pool.Query(ctx, query)
 	duration := time.Since(start)
 	rowsAffected := int64(0)
 
@@ -154,6 +204,10 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 			Duration:     duration,
 			RowsAffected: rowsAffected,
 			Err:          err,
+			Custom: map[string]any{
+				"method": "list",
+				"query":  query,
+			},
 		})
 		return nil, err
 	}
@@ -171,6 +225,10 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 				Duration:     duration,
 				RowsAffected: rowsAffected,
 				Err:          err,
+				Custom: map[string]any{
+					"method": "list",
+					"query":  query,
+				},
 			})
 			return nil, err
 		}
@@ -188,6 +246,10 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 			Duration:     duration,
 			RowsAffected: rowsAffected,
 			Err:          err,
+			Custom: map[string]any{
+				"method": "list",
+				"query":  query,
+			},
 		})
 		return nil, err
 	}
@@ -199,6 +261,10 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 		Duration:     duration,
 		RowsAffected: rowsAffected,
 		Err:          nil,
+		Custom: map[string]any{
+			"method": "list",
+			"query":  query,
+		},
 	})
 	return products, nil
 }

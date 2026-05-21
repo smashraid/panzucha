@@ -30,6 +30,7 @@ type DBLogParams struct {
 	Duration     time.Duration
 	RowsAffected int64
 	Err          error
+	Custom       map[string]any
 }
 
 type BusinessLogParams struct {
@@ -112,10 +113,15 @@ func (l *Logger) LogDB(params DBLogParams) {
 		DurationMs:     ms,
 		Performance:    GetPerformanceBucket(ms),
 		DBRowsAffected: params.RowsAffected,
+		Message:        "Database operation completed",
 	}
 
 	level := "INFO"
-	entry.Message = "Database operation completed"
+
+	if params.Custom != nil {
+		entry.Custom = params.Custom
+	}
+
 	if params.Err != nil {
 		level = "ERROR"
 		entry.Message = "Database operation failed"
