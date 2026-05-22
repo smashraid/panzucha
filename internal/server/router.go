@@ -16,6 +16,7 @@ func NewRouter(
 	cfg *config.Config,
 	productHandler *handlers.ProductHandler,
 	userHandler *handlers.UserHandler,
+	orderHandler *handlers.OrderHandler,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -36,6 +37,7 @@ func NewRouter(
 	r.Route("/api/v1", func(r chi.Router) {
 		routes.RegisterProductRoutes(r, productHandler)
 		routes.RegisterUserRoutes(r, userHandler)
+		routes.RegisterOrderRoutes(r, orderHandler)
 	})
 
 	return r
