@@ -48,8 +48,12 @@ func main() {
 	productService := services.NewProductService(productRepo, log)
 	productHandler := handlers.NewProductHandler(productService, log)
 
+	orderRepo := repositories.NewPostgresOrderRepository(pool, log)
+	orderService := services.NewOrderService(orderRepo, log)
+	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, log)
+
 	// 5. Router (chi)
-	r := server.NewRouter(cfg, productHandler, userHandler)
+	r := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
 
 	// 6. HTTP server
 	srv := &http.Server{

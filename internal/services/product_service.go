@@ -88,15 +88,16 @@ func (s *productService) GetByID(ctx context.Context, id string) (*domain.Produc
 		return nil, err
 	}
 	if product == nil {
+		err := errors.New(logger.MsgBusinessNotFound)
 		s.logger.LogBusiness(logger.BusinessLogParams{
 			Ctx:         ctx,
 			SubCategory: logger.BusinessEntityGet,
 			EntityType:  "product",
 			EntityID:    id,
-			Message:     logger.MsgBusinessNotFound,
+			Message:     err.Error(),
 			Err:         nil,
 		})
-		return nil, errors.New(logger.MsgBusinessNotFound)
+		return nil, err
 	}
 
 	s.logger.LogBusiness(logger.BusinessLogParams{
