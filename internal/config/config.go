@@ -7,6 +7,7 @@ import (
 )
 
 type Config struct {
+	// Existing fields
 	LogstashURL string `env:"LOGSTASH_URL" envDefault:""`
 	Environment string `env:"ENV" envDefault:"development"`
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/postgres?sslmode=disable"`
@@ -17,6 +18,9 @@ type Config struct {
 
 	// Trusted proxies CIDR ranges (comma‑separated). Used by ClientIP middleware.
 	TrustedProxies []string `env:"TRUSTED_PROXIES" envDefault:"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"`
+
+	// Service version – can be set during build (e.g., via -ldflags)
+	Version string `env:"SERVICE_VERSION" envDefault:"1.0.0"`
 }
 
 func Load() *Config {

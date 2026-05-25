@@ -6,6 +6,7 @@ import (
 	"panzucha/internal/auth"
 	"panzucha/internal/domain"
 	"panzucha/internal/logger"
+	"panzucha/internal/metrics"
 	"time"
 )
 
@@ -85,6 +86,7 @@ func (s *userService) Register(ctx context.Context, email, name, password string
 		Err:         nil,
 	})
 	user.Password = ""
+	metrics.UsersCreated.WithLabelValues(user.Role).Inc()
 	return user, nil
 }
 
@@ -229,5 +231,6 @@ func (s *userService) Update(ctx context.Context, id, email, name string) (*doma
 		Err:         nil,
 	})
 	user.Password = ""
+	metrics.UsersUpdated.Inc()
 	return user, nil
 }

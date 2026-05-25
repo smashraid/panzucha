@@ -5,6 +5,7 @@ import (
 	"errors"
 	"panzucha/internal/domain"
 	"panzucha/internal/logger"
+	"panzucha/internal/metrics"
 )
 
 type OrderService interface {
@@ -59,6 +60,12 @@ func (s *orderService) Create(ctx context.Context, o *domain.Order) error {
 		Message:     logger.MsgBusinessCreated,
 		Err:         nil,
 	})
+	metrics.OrdersCreated.Inc()
+	metrics.OrdersTotalPrice.Add(o.TotalPrice)
+	// If status is pending, increment pending gauge
+	if o.Status == domain.OrderStatusPending {
+		metrics.UpdatePendingOrdersGauge(1)
+	}
 	return nil
 }
 
@@ -177,6 +184,7 @@ func (s *orderService) UpdateStatus(ctx context.Context, id string, status domai
 		return err
 	}
 
+	oldStatus := order.Status
 	if err := order.ValidateForUpdateStatus(status); err != nil {
 		s.logger.LogBusiness(logger.BusinessLogParams{
 			Ctx:         ctx,
@@ -209,6 +217,14 @@ func (s *orderService) UpdateStatus(ctx context.Context, id string, status domai
 		Message:     logger.MsgBusinessUpdated,
 		Err:         nil,
 	})
+
+	metrics.IncrementOrderStatusChange(string(oldStatus), string(status))
+	// Update pending gauge
+	if oldStatus == domain.OrderStatusPending && status != domain.OrderStatusPending {
+		metrics.UpdatePendingOrdersGauge(-1)
+	} else if oldStatus != domain.OrderStatusPending && status == domain.OrderStatusPending {
+		metrics.UpdatePendingOrdersGauge(1)
+	}
 	return nil
 }
 

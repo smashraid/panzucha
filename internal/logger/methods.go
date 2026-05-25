@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"log/slog"
+	"panzucha/internal/metrics"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -141,6 +142,7 @@ func (l *Logger) LogDB(params DBLogParams) {
 		entry.Error = params.Err.Error()
 	}
 	l.log(params.Ctx, level, entry)
+	metrics.DBOperationDuration.WithLabelValues(params.Operation, params.Table).Observe(params.Duration.Seconds())
 }
 
 // Business Logging Helper

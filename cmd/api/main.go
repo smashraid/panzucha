@@ -56,7 +56,9 @@ func main() {
 	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, idempotencyService, log)
 
 	// 5. Router (chi)
-	r := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
+	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
+
+	defer telemetryShutdown()
 
 	// 6. HTTP server
 	srv := &http.Server{

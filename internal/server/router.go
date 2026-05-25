@@ -37,8 +37,8 @@ func NewRouter(
 	// --- 1. Setup OpenTelemetry Resource ---
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String("panzucha-api"),
-			semconv.ServiceVersionKey.String("1.0.0"),
+			semconv.ServiceNameKey.String(cfg.ServiceName),
+			semconv.ServiceVersionKey.String(cfg.Version),
 			attribute.String("environment", cfg.Environment),
 		),
 	)
