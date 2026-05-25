@@ -6,6 +6,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type APILogParams struct {
@@ -21,6 +23,7 @@ type APILogParams struct {
 	Err        error
 	Message    string
 	Payload    any
+	Custom     map[string]any
 }
 
 type DBLogParams struct {
@@ -60,6 +63,15 @@ func (l *Logger) log(ctx context.Context, level string, entry LogEntry) {
 // LogAPI records an HTTP API request/response.
 // If err is not nil, the log is marked as ERROR and includes error details + stack trace.
 func (l *Logger) LogAPI(params APILogParams) {
+	ctx := params.Ctx
+	spanCtx := trace.SpanContextFromContext(ctx)
+	if spanCtx.IsValid() {
+		if params.Custom == nil {
+			params.Custom = make(map[string]any)
+		}
+		params.Custom["trace_id"] = spanCtx.TraceID().String()
+		params.Custom["span_id"] = spanCtx.SpanID().String()
+	}
 	ms := params.Duration.Milliseconds()
 	entry := LogEntry{
 		Category:    string(CategoryAPI),
@@ -74,6 +86,7 @@ func (l *Logger) LogAPI(params APILogParams) {
 		UserID:      params.UserID,
 		ClientIP:    params.ClientIP,
 		UserAgent:   params.UserAgent,
+		Custom:      params.Custom,
 	}
 
 	level := "INFO"
@@ -99,7 +112,7 @@ func (l *Logger) LogAPI(params APILogParams) {
 		entry.RequestPayload = params.Payload
 	}
 
-	l.log(params.Ctx, level, entry)
+	l.log(ctx, level, entry)
 }
 
 // Database Logging Helper

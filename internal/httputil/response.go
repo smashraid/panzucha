@@ -13,3 +13,10 @@ func RespondJSON(w http.ResponseWriter, status int, data any) {
 		json.NewEncoder(w).Encode(data)
 	}
 }
+
+// RespondRaw writes a raw response body with the given status code and content type.
+func RespondRaw(w http.ResponseWriter, statusCode int, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(body)
+}
