@@ -9,6 +9,7 @@ import (
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
 	"panzucha/internal/logger"
+	"panzucha/internal/messaging"
 	repositories "panzucha/internal/repositories/postgres"
 
 	"panzucha/internal/server"
@@ -29,6 +30,12 @@ func main() {
 
 	log := logger.New(cfg)
 	// defer log.Close()
+
+	rabbitMQ := messaging.NewRabbitMQ(cfg.RabbitMQURL)
+	if err := rabbitMQ.Connect(); err != nil {
+		slog.Error("failed to connect to RabbitMQ", "error", err)
+		os.Exit(1)
+	}
 
 	// 3. Database connection
 	ctx := context.Background()
