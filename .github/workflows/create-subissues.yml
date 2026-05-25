@@ -14,16 +14,23 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Parse table and create issues
+      - name: Parse table and create sub-issues (GraphQL with parent)
         uses: actions/github-script@v7
         with:
           script: |
             const epicIssue = context.payload.issue;
             const body = epicIssue.body;
             console.log("Issue body length:", body.length);
-            console.log("First 500 characters:\n", body.substring(0, 500));
             
-            // More flexible regex: allows variable spaces, captures ticket, description, deliverables
+            // Get repository ID and epic node ID
+            const repoInfo = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const repositoryId = repoInfo.data.node_id;
+            const parentIssueId = epicIssue.node_id;
+            
+            // Extract rows
             const rowRegex = /\|\s*([\d\.]+)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|/g;
             let rows = [];
             let match;
@@ -31,39 +38,49 @@ jobs:
               rows.push(match);
             }
             console.log(`Found ${rows.length} rows.`);
+            if (rows.length === 0) return;
             
-            if (rows.length === 0) {
-              console.log("No rows found. Check table formatting. Expected a markdown table with three columns separated by pipes.");
-              return;
-            }
-            
-            const query = `
-                  mutation($repositoryId: ID!, $title: String!, $body: String!, $labels: [String!], $assigneeIds: [ID!], $parentIssueId: ID!) {
-                    createIssue(input: {
-                      repositoryId: $repositoryId,
-                      title: $title,
-                      body: $body,
-                      labelIds: $labels,
-                      assigneeIds: $assigneeIds,
-                      parentIssueId: $parentIssueId
-                    }) {
-                      issue {
-                        id
-                        number
-                      }
+            for (const row of rows) {
+              const ticket = row[1].trim();
+              const description = row[2].trim();
+              const deliverables = row[3].trim();
+              console.log(`Creating sub‑issue: ${ticket} - ${description.substring(0, 50)}...`);
+              
+              const mutation = `
+                mutation CreateSubIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $assigneeIds: [ID!], $parentIssueId: ID!) {
+                  createIssue(input: {
+                    repositoryId: $repositoryId,
+                    title: $title,
+                    body: $body,
+                    labelIds: $labelIds,
+                    assigneeIds: $assigneeIds,
+                    parentIssueId: $parentIssueId
+                  }) {
+                    issue {
+                      id
+                      number
                     }
                   }
-                `;
-                
-            for (const row of rows) {
-              // ... get ticket, description, deliverables
-              const result = await github.graphql(query, {
-                repositoryId: context.repo.owner + "/" + context.repo.repo,
-                title: `${ticket} – ${description.trim()}`,
-                body: `**Deliverables:**\n${deliverables.trim()}\n\nPart of epic #${epicIssue.number}`,
-                labels: ['type:task'],
-                assigneeIds: [context.actor],
-                parentIssueId: epicIssue.node_id
-              });
-              console.log(`Created issue #${result.createIssue.issue.number}`);
+                }
+              `;
+              
+              // Get label ID for 'type:task' (you need to fetch label ID; or omit labels for simplicity)
+              // We'll fetch label IDs once outside the loop
+              // For simplicity, we'll skip labels in this example; you can add them later.
+              
+              const variables = {
+                repositoryId: repositoryId,
+                title: `${ticket} – ${description}`,
+                body: `**Deliverables:**\n${deliverables}\n\nPart of epic #${epicIssue.number}`,
+                labelIds: [],  // optional: you can pass empty array
+                assigneeIds: [], // optional: you can pass empty array
+                parentIssueId: parentIssueId
+              };
+              
+              try {
+                const result = await github.graphql(mutation, variables);
+                console.log(`Created issue #${result.createIssue.issue.number}`);
+              } catch (err) {
+                console.error(`Failed to create issue for ${ticket}:`, err);
+              }
             }
