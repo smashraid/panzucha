@@ -20,12 +20,26 @@ jobs:
           script: |
             const epicIssue = context.payload.issue;
             const body = epicIssue.body;
-            // Extract table rows (simple regex, assumes markdown table)
-            const rows = body.match(/\| ([\d\.]+) \| (.*?) \| (.*?) \|/g);
-            if (!rows) return;
+            console.log("Issue body length:", body.length);
+            console.log("First 500 characters:\n", body.substring(0, 500));
+            
+            // More flexible regex: allows variable spaces, captures ticket, description, deliverables
+            const rowRegex = /\|\s*([\d\.]+)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|/g;
+            let rows = [];
+            let match;
+            while ((match = rowRegex.exec(body)) !== null) {
+              rows.push(match);
+            }
+            console.log(`Found ${rows.length} rows.`);
+            
+            if (rows.length === 0) {
+              console.log("No rows found. Check table formatting. Expected a markdown table with three columns separated by pipes.");
+              return;
+            }
+            
             for (const row of rows) {
-              const [, ticket, description, deliverables] = row.match(/\| ([\d\.]+) \| (.*?) \| (.*?) \|/);
-              // Create sub-issue
+              const [, ticket, description, deliverables] = row;
+              console.log(`Creating sub‑issue: ${ticket} - ${description.substring(0, 50)}...`);
               await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
