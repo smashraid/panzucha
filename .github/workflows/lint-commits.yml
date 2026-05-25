@@ -1,0 +1,20 @@
+name: Lint Commit Messages
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed to get all commits in the PR
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @commitlint/cli @commitlint/config-conventional
+      - run: |
+          # Check all commits in the PR against the 'main' branch
+          npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
