@@ -1,0 +1,13 @@
+name: Enforce PR source branch
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  check-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if source branch is not develop
+        if: github.head_ref != 'develop'
+        run: |
+          echo "Pull requests into main must come from develop branch"
+          exit 1
