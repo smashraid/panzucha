@@ -268,3 +268,30 @@ func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product,
 	})
 	return products, nil
 }
+
+func (r *PostgresProductRepository) DecrementStock(ctx context.Context, id string, quantity int) error {
+	start := time.Now()
+	query := `UPDATE products SET stock = stock - $1, updated_at = NOW() WHERE id = $2 AND stock >= $1`
+	result, err := r.pool.Exec(ctx, query, quantity, id)
+	duration := time.Since(start)
+	rowsAffected := int64(0)
+	if err == nil {
+		rowsAffected = result.RowsAffected()
+	}
+	r.logger.LogDB(logger.DBLogParams{
+		Ctx:          ctx,
+		Operation:    logger.DBUpdate,
+		Table:        "products",
+		Duration:     duration,
+		RowsAffected: rowsAffected,
+		Err:          err,
+		Custom:       map[string]any{"method": "decrement_stock", "quantity": quantity},
+	})
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrInsufficientStock
+	}
+	return nil
+}

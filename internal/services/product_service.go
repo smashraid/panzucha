@@ -5,6 +5,7 @@ import (
 	"errors"
 	"panzucha/internal/domain"
 	"panzucha/internal/logger"
+	"panzucha/internal/metrics"
 )
 
 type ProductService interface {
@@ -58,6 +59,7 @@ func (s *productService) Create(ctx context.Context, p *domain.Product) error {
 		Message:     logger.MsgBusinessCreated,
 		Err:         nil,
 	})
+	metrics.ProductsCreated.Inc()
 	return nil
 }
 
@@ -163,6 +165,7 @@ func (s *productService) Update(ctx context.Context, p *domain.Product) error {
 		Message:     logger.MsgBusinessUpdated,
 		Err:         nil,
 	})
+	metrics.ProductsUpdated.Inc()
 	return nil
 }
 
@@ -206,6 +209,7 @@ func (s *productService) Delete(ctx context.Context, id string) error {
 		Message:     logger.MsgBusinessDeleted,
 		Err:         nil,
 	})
+	metrics.ProductsDeleted.Inc()
 	return nil
 }
 
@@ -260,4 +264,22 @@ func (s *productService) productExists(ctx context.Context, id string) (*domain.
 		return nil, err
 	}
 	return product, nil
+}
+
+func (s *productService) DecrementStock(ctx context.Context, id string, quantity int) error {
+	if id == "" {
+		return errors.New("invalid product id")
+	}
+	if quantity <= 0 {
+		return errors.New("quantity must be positive")
+	}
+	// Optional: check product exists first
+	product, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if product == nil {
+		return domain.ErrNotFound
+	}
+	return s.repo.DecrementStock(ctx, id, quantity)
 }

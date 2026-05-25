@@ -19,30 +19,106 @@ import (
 )
 
 type OrderHandler struct {
-	orderService   services.OrderService
-	productService services.ProductService
-	userService    services.UserService
-	logger         *logger.Logger
+	orderService       services.OrderService
+	productService     services.ProductService
+	userService        services.UserService
+	idempotencyService services.IdempotencyService
+	logger             *logger.Logger
 }
 
 func NewOrderHandler(
 	orderService services.OrderService,
 	productService services.ProductService,
 	userService services.UserService,
+	idempotencyService services.IdempotencyService,
 	log *logger.Logger,
 ) *OrderHandler {
 	return &OrderHandler{
-		orderService:   orderService,
-		productService: productService,
-		userService:    userService,
-		logger:         log,
+		orderService:       orderService,
+		productService:     productService,
+		userService:        userService,
+		idempotencyService: idempotencyService,
+		logger:             log,
 	}
 }
 
 // Create handles POST /orders
 func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 	info := ExtractRequestInfo(r)
+	idempotencyKey, err := ExtractIdempotencyKey(r)
+	if err != nil {
+		h.logger.LogAPI(logger.APILogParams{
+			Ctx:        r.Context(),
+			Method:     r.Method,
+			Path:       r.URL.Path,
+			StatusCode: http.StatusBadRequest,
+			Duration:   time.Since(info.StartTime),
+			RequestID:  info.RequestID,
+			UserID:     info.UserID,
+			ClientIP:   info.ClientIP,
+			UserAgent:  info.UserAgent,
+			Err:        err,
+			Message:    logger.MsgIdempotencyNotFound,
+			Payload:    nil,
+		})
+		http.Error(w, logger.MsgIdempotencyNotFound, http.StatusBadRequest)
+		return
+	}
 
+	// Phase 1: Reserve the key
+	isOwner, cached, err := h.idempotencyService.Reserve(r.Context(), idempotencyKey)
+	if err != nil {
+		h.logger.LogAPI(logger.APILogParams{
+			Ctx:        r.Context(),
+			Method:     r.Method,
+			Path:       r.URL.Path,
+			StatusCode: http.StatusBadRequest,
+			Duration:   time.Since(info.StartTime),
+			RequestID:  info.RequestID,
+			UserID:     info.UserID,
+			ClientIP:   info.ClientIP,
+			UserAgent:  info.UserAgent,
+			Err:        err,
+			Message:    logger.MsgIdempotencyReservationFailed,
+			Payload:    nil,
+			Custom: map[string]any{
+				"isOwner":  isOwner,
+				"isCached": cached != nil,
+			},
+		})
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if !isOwner {
+		if cached != nil {
+			// Key already completed – return cached response
+			httputil.RespondRaw(w, cached.ResponseStatus, cached.ResponseBody)
+			return
+		}
+		// Key is still processing by another request
+		h.logger.LogAPI(logger.APILogParams{
+			Ctx:        r.Context(),
+			Method:     r.Method,
+			Path:       r.URL.Path,
+			StatusCode: http.StatusBadRequest,
+			Duration:   time.Since(info.StartTime),
+			RequestID:  info.RequestID,
+			UserID:     info.UserID,
+			ClientIP:   info.ClientIP,
+			UserAgent:  info.UserAgent,
+			Err:        nil,
+			Message:    logger.MsgIdempotencyProcessing,
+			Payload:    nil,
+			Custom: map[string]any{
+				"isOwner": isOwner,
+			},
+		})
+		http.Error(w, "request already in progress, please retry", http.StatusConflict)
+		return
+	}
+
+	// Phase 2: Process the order (business logic)
 	var req dto.CreateOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.LogAPI(logger.APILogParams{
@@ -59,6 +135,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Message:    logger.MsgBusinessInvalidJSON,
 			Payload:    nil,
 		})
+		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
 		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
 		return
 	}
@@ -78,12 +155,13 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Message:    logger.MsgBusinessValidationFailed,
 			Payload:    req,
 		})
+		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Verify user exists
-	_, err := h.userService.GetByID(r.Context(), info.UserID)
+	_, err = h.userService.GetByID(r.Context(), info.UserID)
 	if err != nil {
 		h.logger.LogAPI(logger.APILogParams{
 			Ctx:        r.Context(),
@@ -99,6 +177,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Message:    "user not found",
 			Payload:    req,
 		})
+		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
 		http.Error(w, "user not found", http.StatusBadRequest)
 		return
 	}
@@ -120,6 +199,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Message:    "product not found",
 			Payload:    req,
 		})
+		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
 		http.Error(w, "product not found", http.StatusBadRequest)
 		return
 	}
@@ -143,10 +223,12 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Message:    "failed to create order",
 			Payload:    req,
 		})
+		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
 		http.Error(w, "failed to create order", http.StatusInternalServerError)
 		return
 	}
 
+	// Phase 3: Complete the key with final response
 	resp := mapper.FromDomainToOrderResponse(order)
 	h.logger.LogAPI(logger.APILogParams{
 		Ctx:        r.Context(),
@@ -162,6 +244,24 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Message:    logger.MsgBusinessCreated,
 		Payload:    req,
 	})
+
+	respBody, _ := json.Marshal(resp)
+	if err := h.idempotencyService.Complete(r.Context(), idempotencyKey, "order", order.ID, http.StatusCreated, respBody); err != nil {
+		h.logger.LogAPI(logger.APILogParams{
+			Ctx:        r.Context(),
+			Method:     r.Method,
+			Path:       r.URL.Path,
+			StatusCode: http.StatusCreated,
+			Duration:   time.Since(info.StartTime),
+			RequestID:  info.RequestID,
+			UserID:     info.UserID,
+			ClientIP:   info.ClientIP,
+			UserAgent:  info.UserAgent,
+			Err:        err,
+			Message:    logger.MsgIdempotencyCreateFailed,
+			Payload:    req,
+		})
+	}
 	httputil.RespondJSON(w, http.StatusCreated, resp)
 }
 

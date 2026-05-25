@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"panzucha/internal/auth"
+	"slices"
 )
 
 func RequireRole(requiredRoles ...string) func(http.Handler) http.Handler {
@@ -15,11 +16,9 @@ func RequireRole(requiredRoles ...string) func(http.Handler) http.Handler {
 			}
 			// Check if user has at least one of the required roles
 			for _, rl := range roles {
-				for _, allowed := range requiredRoles {
-					if rl == allowed {
-						next.ServeHTTP(w, r)
-						return
-					}
+				if slices.Contains(requiredRoles, rl) {
+					next.ServeHTTP(w, r)
+					return
 				}
 			}
 			http.Error(w, "insufficient permissions", http.StatusForbidden)
