@@ -40,12 +40,17 @@ jobs:
             for (const row of rows) {
               const [, ticket, description, deliverables] = row;
               console.log(`Creating sub‑issue: ${ticket} - ${description.substring(0, 50)}...`);
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: `${ticket} – ${description.trim()}`,
-                body: `**Deliverables:**\n${deliverables.trim()}\n\nPart of epic #${epicIssue.number}`,
-                labels: ['type:task'],
-                assignees: [context.actor]
-              });
+              try {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `${ticket} – ${description.trim()}`,
+                  body: `**Deliverables:**\n${deliverables.trim()}\n\nPart of epic #${epicIssue.number}`,
+                  labels: ['type:task'],
+                  assignees: [context.actor],
+                  parent_issue_id: epicIssue.id   // 👈 This links as child issue
+                });
+              } catch (err) {
+                console.error(`Failed to create sub‑issue for ${ticket}:`, err);
+              }
             }
