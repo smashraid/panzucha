@@ -37,20 +37,33 @@ jobs:
               return;
             }
             
+            const query = `
+                  mutation($repositoryId: ID!, $title: String!, $body: String!, $labels: [String!], $assigneeIds: [ID!], $parentIssueId: ID!) {
+                    createIssue(input: {
+                      repositoryId: $repositoryId,
+                      title: $title,
+                      body: $body,
+                      labelIds: $labels,
+                      assigneeIds: $assigneeIds,
+                      parentIssueId: $parentIssueId
+                    }) {
+                      issue {
+                        id
+                        number
+                      }
+                    }
+                  }
+                `;
+                
             for (const row of rows) {
-              const [, ticket, description, deliverables] = row;
-              console.log(`Creating sub‑issue: ${ticket} - ${description.substring(0, 50)}...`);
-              try {
-                await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: `${ticket} – ${description.trim()}`,
-                  body: `**Deliverables:**\n${deliverables.trim()}\n\nPart of epic #${epicIssue.number}`,
-                  labels: ['type:task'],
-                  assignees: [context.actor],
-                  parent_issue_id: epicIssue.id   // 👈 This links as child issue
-                });
-              } catch (err) {
-                console.error(`Failed to create sub‑issue for ${ticket}:`, err);
-              }
+              // ... get ticket, description, deliverables
+              const result = await github.graphql(query, {
+                repositoryId: context.repo.owner + "/" + context.repo.repo,
+                title: `${ticket} – ${description.trim()}`,
+                body: `**Deliverables:**\n${deliverables.trim()}\n\nPart of epic #${epicIssue.number}`,
+                labels: ['type:task'],
+                assigneeIds: [context.actor],
+                parentIssueId: epicIssue.node_id
+              });
+              console.log(`Created issue #${result.createIssue.issue.number}`);
             }
