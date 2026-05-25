@@ -48,8 +48,17 @@ func main() {
 	productService := services.NewProductService(productRepo, log)
 	productHandler := handlers.NewProductHandler(productService, log)
 
+	idempotencyRepo := repositories.NewPostgresIdempotencyKeyRepository(pool, log)
+	idempotencyService := services.NewIdempotencyService(idempotencyRepo)
+
+	orderRepo := repositories.NewPostgresOrderRepository(pool, log)
+	orderService := services.NewOrderService(orderRepo, log)
+	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, idempotencyService, log)
+
 	// 5. Router (chi)
-	r := server.NewRouter(cfg, productHandler, userHandler)
+	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
+
+	defer telemetryShutdown()
 
 	// 6. HTTP server
 	srv := &http.Server{

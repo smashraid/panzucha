@@ -48,4 +48,5 @@ type ProductRepository interface {
 	Update(ctx context.Context, p *Product) error
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context) ([]Product, error)
+	DecrementStock(ctx context.Context, id string, quantity int) error
 }

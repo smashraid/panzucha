@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"panzucha/internal/auth"
 	"panzucha/internal/middleware"
@@ -34,4 +35,13 @@ func ExtractRequestInfo(r *http.Request) *RequestInfo {
 		UserAgent: userAgent,
 		UserID:    userID,
 	}
+}
+
+func ExtractIdempotencyKey(r *http.Request) (string, error) {
+	key := r.Header.Get("Idempotency-Key")
+	if key == "" {
+		return "", errors.New("missing Idempotency-Key header")
+	}
+	// Optional: validate UUID format
+	return key, nil
 }
