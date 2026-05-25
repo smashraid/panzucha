@@ -21,6 +21,8 @@ type Config struct {
 
 	// Service version – can be set during build (e.g., via -ldflags)
 	Version string `env:"SERVICE_VERSION" envDefault:"1.0.0"`
+
+	RabbitMQURL string `env:"RABBITMQ_URL" envDefault:"amqp://guest:guest@localhost:5672/"`
 }
 
 func Load() *Config {

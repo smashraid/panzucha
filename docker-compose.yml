@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - /home/smashraid/volumes/postgresql:/var/lib/postgresql
+    networks:
+      - kind
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: smashraid@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+      - "5000:443"
+    volumes:
+      - /home/smashraid/volumes/pgadmin:/var/lib/pgadmin
+    networks:
+      - kind
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"      # AMQP protocol (Go client)
+      - "15672:15672"    # Management UI
+    volumes:      
+      - /home/smashraid/volumes/rabbitmq:/var/lib/rabbitmq
+      - /home/smashraid/volumes/rabbitmq/conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kind
+
+networks:
+  kind:
+    external: true
+    name: kind
+  # bridge:
+  #   external: true
+  #   name: bridge
