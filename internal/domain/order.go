@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -18,14 +17,13 @@ const (
 )
 
 type Order struct {
-	ID         string      `json:"id" validate:"omitempty,uuid"`
-	UserID     string      `json:"user_id" validate:"required,uuid"`
-	ProductID  string      `json:"product_id" validate:"required,uuid"`
-	Quantity   int         `json:"quantity" validate:"required,gt=0"`
-	TotalPrice float64     `json:"total_price" validate:"required,gt=0"`
-	Status     OrderStatus `json:"status" validate:"omitempty,oneof=pending paid shipped cancelled"`
-	CreatedAt  time.Time   `json:"created_at" validate:"omitempty"`
-	UpdatedAt  time.Time   `json:"updated_at" validate:"omitempty"`
+	ID         string
+	UserID     string
+	ProductID  string
+	Quantity   int
+	TotalPrice float64
+	Status     OrderStatus
+	Audit
 }
 
 func NewOrderID() string {
@@ -38,6 +36,12 @@ func (o *Order) ValidateForCreate() error {
 	}
 	if o.Status != OrderStatusPending {
 		return errors.New("new order status must be 'pending'")
+	}
+	if o.ProductID == "" {
+		return errors.New("product ID is required")
+	}
+	if o.Quantity <= 0 {
+		return errors.New("quantity must be greater than zero")
 	}
 	return nil
 }
@@ -61,9 +65,9 @@ func (o *Order) ValidateForUpdateStatus(newStatus OrderStatus) error {
 }
 
 type OrderRepository interface {
-	Create(ctx context.Context, order *Order) error
 	GetByID(ctx context.Context, id string) (*Order, error)
-	GetByUserID(ctx context.Context, userID string) ([]Order, error)
+	ListByUser(ctx context.Context, userID string, limit, offset int) ([]Order, error)
+	Create(ctx context.Context, order *Order) error
 	UpdateStatus(ctx context.Context, id string, status OrderStatus) error
 	List(ctx context.Context) ([]Order, error)
 }

@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"time"
+	"strconv"
 
 	"panzucha/internal/handlers/dto"
 	"panzucha/internal/handlers/mapper"
@@ -17,52 +17,20 @@ import (
 
 type ProductHandler struct {
 	services services.ProductService
-	logger   *logger.Logger
 }
 
-func NewProductHandler(s services.ProductService, log *logger.Logger) *ProductHandler {
-	return &ProductHandler{services: s, logger: log}
+func NewProductHandler(s services.ProductService) *ProductHandler {
+	return &ProductHandler{services: s}
 }
 
-// Create handles POST /products
 func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-
 	var req dto.CreateProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
 		return
 	}
 
 	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -71,62 +39,17 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := h.services.Create(r.Context(), product); err != nil {
 		status := http.StatusInternalServerError
 		msg := logger.MsgBusinessInternalError
-		// Could inspect error type (e.g., conflict, bad request) but keep simple for now
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    req,
-		})
 		http.Error(w, msg, status)
 		return
 	}
 
 	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusCreated,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessCreated,
-		Payload:    req,
-	})
 	httputil.RespondJSON(w, http.StatusCreated, resp)
 }
 
-// GetByID handles GET /products/{id}
 func (h *ProductHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
 		return
 	}
@@ -137,100 +60,28 @@ func (h *ProductHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		if err.Error() != "product not found" {
 			status = http.StatusInternalServerError
 		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    err.Error(),
-			Payload:    nil,
-		})
 		http.Error(w, err.Error(), status)
 		return
 	}
 
 	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessRetrieved,
-		Payload:    nil,
-	})
 	httputil.RespondJSON(w, http.StatusOK, resp)
 }
 
-// Update handles PUT /products/{id}
 func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
 		return
 	}
 
 	var req dto.UpdateProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
 		return
 	}
 
 	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -244,61 +95,17 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusNotFound
 			msg = logger.MsgBusinessNotFound
 		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    req,
-		})
 		http.Error(w, msg, status)
 		return
 	}
 
 	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessUpdated,
-		Payload:    req,
-	})
 	httputil.RespondJSON(w, http.StatusOK, resp)
 }
 
-// Delete handles DELETE /products/{id}
 func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
 	id := chi.URLParam(r, "id")
 	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
 		return
 	}
@@ -310,61 +117,28 @@ func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusNotFound
 			msg = logger.MsgBusinessNotFound
 		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    nil,
-		})
 		http.Error(w, msg, status)
 		return
 	}
-
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusNoContent,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessDeleted,
-		Payload:    nil,
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// List handles GET /products
 func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
+	limit := 10
+	offset := 0
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if oStr := r.URL.Query().Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
 
-	products, err := h.services.List(r.Context())
+	products, err := h.services.List(r.Context(), limit, offset)
 	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusInternalServerError,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessListFailed,
-			Payload:    nil,
-		})
 		http.Error(w, logger.MsgBusinessInternalError, http.StatusInternalServerError)
 		return
 	}
@@ -374,19 +148,5 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		resp[i] = *mapper.FromDomainToResponse(&p)
 	}
 
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessListed,
-		Payload:    nil,
-	})
 	httputil.RespondJSON(w, http.StatusOK, resp)
 }

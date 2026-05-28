@@ -47,18 +47,18 @@ func main() {
 	defer pool.Close()
 
 	// 4. Repository -> Service -> Handler
-	userRepo := repositories.NewPostgresUserRepository(pool, log)
+	userRepo := repositories.NewPostgresUserRepository(pool)
 	userService := services.NewUserService(userRepo, log)
 	userHandler := handlers.NewUserHandler(userService, log)
 
-	productRepo := repositories.NewPostgresProductRepository(pool, log)
-	productService := services.NewProductService(productRepo, log)
-	productHandler := handlers.NewProductHandler(productService, log)
+	productRepo := repositories.NewPostgresProductRepository(pool)
+	productService := services.NewProductService(productRepo)
+	productHandler := handlers.NewProductHandler(productService)
 
 	idempotencyRepo := repositories.NewPostgresIdempotencyKeyRepository(pool, log)
 	idempotencyService := services.NewIdempotencyService(idempotencyRepo)
 
-	orderRepo := repositories.NewPostgresOrderRepository(pool, log)
+	orderRepo := repositories.NewPostgresOrderRepository(pool)
 	orderService := services.NewOrderService(orderRepo, log)
 	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, idempotencyService, log)
 
