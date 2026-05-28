@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,6 +47,8 @@ func main() {
 	}
 	defer pool.Close()
 
+	validate := validator.New()
+
 	// 4. Repository -> Service -> Handler
 	userRepo := repositories.NewPostgresUserRepository(pool)
 	userService := services.NewUserService(userRepo, log)
@@ -53,7 +56,7 @@ func main() {
 
 	productRepo := repositories.NewPostgresProductRepository(pool)
 	productService := services.NewProductService(productRepo)
-	productHandler := handlers.NewProductHandler(productService)
+	productHandler := handlers.NewProductHandler(productService, validate)
 
 	idempotencyRepo := repositories.NewPostgresIdempotencyKeyRepository(pool, log)
 	idempotencyService := services.NewIdempotencyService(idempotencyRepo)
