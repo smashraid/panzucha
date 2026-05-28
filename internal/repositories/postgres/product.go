@@ -2,296 +2,160 @@ package repositories
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
-	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresProductRepository struct {
-	pool   *pgxpool.Pool
-	logger *logger.Logger
+	pool *pgxpool.Pool
 }
 
 var _ domain.ProductRepository = (*PostgresProductRepository)(nil)
 
-func NewPostgresProductRepository(pool *pgxpool.Pool, log *logger.Logger) *PostgresProductRepository {
-	return &PostgresProductRepository{pool: pool, logger: log}
-}
-
-func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Product) error {
-	start := time.Now()
-	if p.ID == "" {
-		p.ID = domain.NewProductID()
-	}
-
-	now := time.Now().UTC()
-	p.CreatedAt = now
-	p.UpdatedAt = now
-	query := `INSERT INTO products (id, name, price, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`
-	result, err := r.pool.Exec(ctx,
-		query,
-		p.ID, p.Name, p.Price, p.CreatedAt, p.UpdatedAt,
-	)
-
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected = result.RowsAffected()
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBInsert,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom: map[string]any{
-			"method": "create",
-			"query":  query,
-		},
-	})
-	return err
+func NewPostgresProductRepository(pool *pgxpool.Pool) *PostgresProductRepository {
+	return &PostgresProductRepository{pool: pool}
 }
 
 func (r *PostgresProductRepository) GetByID(ctx context.Context, id string) (*domain.Product, error) {
-	start := time.Now()
+	const q = `
+		SELECT id, name, description, price, stock, version,
+		       created_at, created_by, updated_at, updated_by
+		FROM   products
+		WHERE  id = $1`
+
 	var p domain.Product
-	query := `SELECT id, name, price FROM products WHERE id=$1`
-	err := r.pool.QueryRow(ctx,
-		query,
-		id,
-	).Scan(&p.ID, &p.Name, &p.Price)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "products",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          nil,
-			Custom: map[string]any{
-				"method": "get_by_id",
-				"query":  query,
-			},
-		})
-		return nil, nil
-	}
-
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&p.ID, &p.Name, &p.Description,
+		&p.Price, &p.Stock, &p.Version,
+		&p.Audit.CreatedAt, &p.Audit.CreatedBy,
+		&p.Audit.UpdatedAt, &p.Audit.UpdatedBy,
+	)
 	if err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "products",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom: map[string]any{
-				"method": "get_by_id",
-				"query":  query,
-			},
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
 		return nil, err
 	}
-
-	rowsAffected = 1
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBSelect,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          nil,
-		Custom: map[string]any{
-			"method": "get_by_id",
-			"query":  query,
-		},
-	})
 	return &p, nil
 }
 
-func (r *PostgresProductRepository) Delete(ctx context.Context, id string) error {
-	start := time.Now()
-	query := `DELETE FROM products WHERE id = $1`
-	result, err := r.pool.Exec(ctx, query, id)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
+func (r *PostgresProductRepository) List(ctx context.Context, limit, offset int) ([]domain.Product, error) {
+	const q = `
+		SELECT id, name, description, price, stock, version,
+		       created_at, created_by, updated_at, updated_by
+		FROM   products
+		ORDER  BY created_at DESC
+		LIMIT  $1 OFFSET $2`
 
-	if err == nil {
-		rowsAffected = result.RowsAffected()
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBDelete,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom: map[string]any{
-			"method": "delete",
-			"query":  query,
-		},
-	})
-
+	rows, err := r.pool.Query(ctx, q, limit, offset)
 	if err != nil {
-		return err
-	}
-	if rowsAffected == 0 {
-		return errors.New(logger.MsgBusinessNotFound)
-	}
-	return nil
-}
-
-func (r *PostgresProductRepository) Update(ctx context.Context, p *domain.Product) error {
-	start := time.Now()
-	now := time.Now().UTC()
-	p.UpdatedAt = now
-	query := `UPDATE products SET name = $1, price = $2, updated_at = $3 WHERE id = $4`
-	result, err := r.pool.Exec(ctx,
-		query,
-		p.Name, p.Price, p.UpdatedAt, p.ID)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-
-	if err == nil {
-		rowsAffected = result.RowsAffected()
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBUpdate,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom: map[string]any{
-			"method": "update",
-			"query":  query,
-		},
-	})
-
-	if err != nil {
-		return err
-	}
-
-	if rowsAffected == 0 {
-		return errors.New(logger.MsgBusinessNotFound)
-	}
-
-	return nil
-}
-
-func (r *PostgresProductRepository) List(ctx context.Context) ([]domain.Product, error) {
-	start := time.Now()
-	query := `SELECT id, name, price FROM products`
-	rows, err := r.pool.Query(ctx, query)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-
-	if err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "products",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom: map[string]any{
-				"method": "list",
-				"query":  query,
-			},
-		})
 		return nil, err
 	}
 	defer rows.Close()
+
 	var products []domain.Product
 	for rows.Next() {
 		var p domain.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Price); err != nil {
-			duration = time.Since(start)
-			rowsAffected = int64(len(products))
-			r.logger.LogDB(logger.DBLogParams{
-				Ctx:          ctx,
-				Operation:    logger.DBSelect,
-				Table:        "products",
-				Duration:     duration,
-				RowsAffected: rowsAffected,
-				Err:          err,
-				Custom: map[string]any{
-					"method": "list",
-					"query":  query,
-				},
-			})
+		if err := rows.Scan(
+			&p.ID, &p.Name, &p.Description,
+			&p.Price, &p.Stock, &p.Version,
+			&p.Audit.CreatedAt, &p.Audit.CreatedBy,
+			&p.Audit.UpdatedAt, &p.Audit.UpdatedBy,
+		); err != nil {
 			return nil, err
 		}
 		products = append(products, p)
 	}
-
-	duration = time.Since(start)
-	rowsAffected = int64(len(products))
-
-	if err := rows.Err(); err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "products",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom: map[string]any{
-				"method": "list",
-				"query":  query,
-			},
-		})
-		return nil, err
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBSelect,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          nil,
-		Custom: map[string]any{
-			"method": "list",
-			"query":  query,
-		},
-	})
-	return products, nil
+	return products, rows.Err()
 }
 
-func (r *PostgresProductRepository) DecrementStock(ctx context.Context, id string, quantity int) error {
-	start := time.Now()
-	query := `UPDATE products SET stock = stock - $1, updated_at = NOW() WHERE id = $2 AND stock >= $1`
-	result, err := r.pool.Exec(ctx, query, quantity, id)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected = result.RowsAffected()
+func (r *PostgresProductRepository) Create(ctx context.Context, p *domain.Product) error {
+	const q = `
+		INSERT INTO products
+			(id, name, description, price, stock, version, created_at, created_by, updated_at, updated_by)
+		VALUES
+			($1, $2, $3, $4, $5, 1, NOW(), $6, NOW(), $6)
+		RETURNING version, created_at, updated_at`
+
+	return r.pool.QueryRow(ctx, q,
+		p.ID, p.Name, p.Description, p.Price, p.Stock,
+		p.Audit.CreatedBy,
+	).Scan(&p.Version, &p.Audit.CreatedAt, &p.Audit.UpdatedAt)
+}
+
+func (r *PostgresProductRepository) Update(ctx context.Context, p *domain.Product) error {
+	const q = `
+		UPDATE products
+		SET    name        = $1,
+		       description = $2,
+		       price       = $3,
+		       stock       = $4,
+		       updated_by  = $5,
+		       updated_at  = NOW(),
+		       version     = version + 1
+		WHERE  id = $6
+		RETURNING version, updated_at`
+
+	err := r.pool.QueryRow(ctx, q,
+		p.Name, p.Description, p.Price, p.Stock,
+		p.Audit.UpdatedBy, p.ID,
+	).Scan(&p.Version, &p.Audit.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return err
 	}
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBUpdate,
-		Table:        "products",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom:       map[string]any{"method": "decrement_stock", "quantity": quantity},
-	})
+	return nil
+}
+
+func (r *PostgresProductRepository) Delete(ctx context.Context, id string) error {
+	const q = `DELETE FROM products WHERE id = $1`
+
+	tag, err := r.pool.Exec(ctx, q, id)
 	if err != nil {
 		return err
 	}
-	if rowsAffected == 0 {
-		return domain.ErrInsufficientStock
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
+}
+
+func (r *PostgresProductRepository) DecrementStock(ctx context.Context, id string, qty int, version int) error {
+	const q = `
+		UPDATE products
+		SET    stock   = stock - $1,
+		       version = version + 1,
+		       updated_at = NOW()
+		WHERE  id = $2 AND version = $3 AND stock >= $1`
+
+	tag, err := r.pool.Exec(ctx, q, qty, id, version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 1 {
+		return nil
+	}
+
+	// Distinguish the three failure causes with a single follow-up SELECT.
+	var current struct {
+		Stock   int
+		Version int
+	}
+	const check = `SELECT stock, version FROM products WHERE id = $1`
+	err = r.pool.QueryRow(ctx, check, id).Scan(&current.Stock, &current.Version)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return err
+	}
+	if current.Version != version {
+		return domain.ErrVersionConflict
+	}
+	return domain.ErrInsufficientStock
 }
