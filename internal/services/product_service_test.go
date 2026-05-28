@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"panzucha/internal/config"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
 	"panzucha/internal/services"
+
+	"github.com/google/uuid"
 )
 
 type mockProductRepository struct {
@@ -77,17 +77,12 @@ func (m *mockProductRepository) DecrementStock(ctx context.Context, id string, q
 
 func TestProductStockAndOptimisticLocking(t *testing.T) {
 	repo := newMockProductRepository()
-	cfg := &config.Config{
-		ServiceName: "test-product-service",
-		Environment: "development",
-	}
-	log := logger.New(cfg)
-	svc := services.NewProductService(repo, log)
+	svc := services.NewProductService(repo)
 
 	ctx := context.Background()
 
 	product := &domain.Product{
-		ID:          domain.NewProductID(),
+		ID:          uuid.New().String(),
 		Name:        "Premium Laptop",
 		Description: "A stunning premium notebook",
 		Price:       1299.99,
