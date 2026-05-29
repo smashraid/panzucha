@@ -10,7 +10,6 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// Unified error envelope. Clients always get this shape.
 type APIError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -22,12 +21,10 @@ func RespondJSON(w http.ResponseWriter, status int, data any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "err", err)
-		http.Error(w, "internal encoding error", http.StatusInternalServerError)
+		http.Error(w, `{"code":"INTERNAL_ERROR","message":"internal encoding error"}`, http.StatusInternalServerError)
 	}
 }
 
-// RespondError maps domain errors to HTTP status + safe client message.
-// CALLERS MUST LOG THE ERROR CONTEXT BEFORE CALLING THIS.
 func RespondError(w http.ResponseWriter, err error) {
 	status, code, msg, details := mapDomainError(err)
 	RespondJSON(w, status, APIError{Code: code, Message: msg, Details: details})
@@ -39,27 +36,30 @@ func mapDomainError(err error) (int, string, string, any) {
 		return http.StatusNotFound, "NOT_FOUND", "resource not found", nil
 	case errors.Is(err, domain.ErrConflict):
 		return http.StatusConflict, "CONFLICT", "resource conflict", nil
+	case errors.Is(err, domain.ErrVersionConflict):
+		return http.StatusConflict, "CONFLICT", "concurrent update detected, please retry", nil
 	case errors.Is(err, domain.ErrUnauthorized):
 		return http.StatusUnauthorized, "UNAUTHORIZED", "invalid credentials", nil
 	case errors.Is(err, domain.ErrForbidden):
 		return http.StatusForbidden, "FORBIDDEN", "insufficient permissions", nil
+	case errors.Is(err, domain.ErrInsufficientStock):
+		return http.StatusConflict, "INSUFFICIENT_STOCK", "insufficient stock for one or more items", nil
 	case errors.Is(err, domain.ErrInvalidInput):
-		var ve validator.ValidationErrors
-		if errors.As(err, &ve) {
+		if ve, ok := errors.AsType[validator.ValidationErrors](err); ok {
 			fields := make(map[string]string, len(ve))
 			for _, fe := range ve {
 				fields[fe.Field()] = translateValidatorTag(fe.Tag())
 			}
-			return http.StatusUnprocessableEntity, "VALIDATION_FAILED", "invalid input", fields
+			return http.StatusUnprocessableEntity, "VALIDATION_FAILED", "invalid input parameters", fields
 		}
-		// Non-validator invalid input → sanitize
-		return http.StatusBadRequest, "INVALID_INPUT", "invalid input parameters", nil
+		// Non-validator invalid input → sanitize. Never leak err.Error()
+		return http.StatusBadRequest, "INVALID_INPUT", "invalid request parameters", nil
 	default:
+		// Unexpected error → log in handler, return generic 500
 		return http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", nil
 	}
 }
 
-// Translate internal validator tags to client-safe strings
 func translateValidatorTag(tag string) string {
 	switch tag {
 	case "required":

@@ -41,7 +41,7 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	user, err := h.svc.Register(r.Context(), req.Email, req.Name, req.Password)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
-			slog.WarnContext(r.Context(), "register: email already exists", "email", req.Email)
+			slog.WarnContext(r.Context(), "register: conflict", "domain_err", "email_taken")
 		} else {
 			slog.ErrorContext(r.Context(), "register: failed", "err", err, "email", req.Email)
 		}
@@ -69,9 +69,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, err := h.svc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
-		// Log at Warn, not Error — wrong credentials is expected, not exceptional.
-		// Never log the password or the specific failure reason (user not found vs wrong password).
-		slog.WarnContext(r.Context(), "login: authentication failed", "email", req.Email)
+		slog.WarnContext(r.Context(), "login: authentication failed")
 		httputil.RespondError(w, err)
 		return
 	}

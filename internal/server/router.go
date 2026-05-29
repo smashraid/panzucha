@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
@@ -105,7 +106,7 @@ func NewRouter(
 	if cfg.Environment == "development" {
 		r.Use(middleware.Logger)
 	} else {
-		r.Use(mymiddleware.LoggingMiddleware)
+		r.Use(mymiddleware.StructuredLogger(slog.Default()))
 	}
 
 	// Expose Prometheus metrics endpoint
