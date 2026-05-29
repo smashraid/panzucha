@@ -10,16 +10,15 @@ import (
 	"panzucha/internal/httputil"
 	"panzucha/internal/logger"
 	"panzucha/internal/services"
-	"panzucha/internal/validation"
 )
 
 type UserHandler struct {
-	svc        services.UserService
-	validation *validator.Validate
+	svc      services.UserService
+	validate *validator.Validate
 }
 
 func NewUserHandler(s services.UserService, v *validator.Validate) *UserHandler {
-	return &UserHandler{svc: s, validation: v}
+	return &UserHandler{svc: s, validate: v}
 }
 
 // Register handles POST /users/register
@@ -30,7 +29,7 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validation.Validate.Struct(req); err != nil {
+	if err := h.validate.Struct(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -65,7 +64,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validation.Validate.Struct(req); err != nil {
+	if err := h.validate.Struct(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -121,7 +120,7 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validation.Validate.Struct(req); err != nil {
+	if err := h.validate.Struct(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
