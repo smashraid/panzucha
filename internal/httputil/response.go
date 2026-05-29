@@ -5,9 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"panzucha/internal/domain"
 
 	"github.com/go-playground/validator/v10"
+
+	"panzucha/internal/domain"
 )
 
 type APIError struct {
@@ -21,41 +22,71 @@ func RespondJSON(w http.ResponseWriter, status int, data any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "err", err)
-		http.Error(w, `{"code":"INTERNAL_ERROR","message":"internal encoding error"}`, http.StatusInternalServerError)
+		http.Error(w,
+			`{"code":"INTERNAL_ERROR","message":"internal encoding error"}`,
+			http.StatusInternalServerError,
+		)
 	}
 }
 
+// RespondError maps any error to a structured JSON response.
 func RespondError(w http.ResponseWriter, err error) {
+	// Step 1 — validator.ValidationErrors are not domain errors.
+	// errors.As unwraps the chain, so this works even if the validator error
+	// is wrapped with fmt.Errorf("%w", ...) somewhere upstream.
+	if ve, ok := errors.AsType[validator.ValidationErrors](err); ok {
+		fields := make(map[string]string, len(ve))
+		for _, fe := range ve {
+			fields[fe.Field()] = translateValidatorTag(fe.Tag())
+		}
+		RespondJSON(w, http.StatusUnprocessableEntity, APIError{
+			Code:    "VALIDATION_FAILED",
+			Message: "invalid input parameters",
+			Details: fields,
+		})
+		return
+	}
+
+	// Step 2 — domain sentinel errors.
 	status, code, msg, details := mapDomainError(err)
-	RespondJSON(w, status, APIError{Code: code, Message: msg, Details: details})
+	RespondJSON(w, status, APIError{
+		Code:    code,
+		Message: msg,
+		Details: details,
+	})
 }
 
-func mapDomainError(err error) (int, string, string, any) {
+// mapDomainError translates domain sentinel errors into HTTP status codes.
+// validator.ValidationErrors are handled upstream in RespondError —
+// they never reach this function.
+func mapDomainError(err error) (status int, code string, msg string, details any) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound, "NOT_FOUND", "resource not found", nil
+
 	case errors.Is(err, domain.ErrConflict):
 		return http.StatusConflict, "CONFLICT", "resource conflict", nil
+
 	case errors.Is(err, domain.ErrVersionConflict):
-		return http.StatusConflict, "CONFLICT", "concurrent update detected, please retry", nil
-	case errors.Is(err, domain.ErrUnauthorized):
-		return http.StatusUnauthorized, "UNAUTHORIZED", "invalid credentials", nil
-	case errors.Is(err, domain.ErrForbidden):
-		return http.StatusForbidden, "FORBIDDEN", "insufficient permissions", nil
+		return http.StatusConflict, "VERSION_CONFLICT", "concurrent update detected, please retry", nil
+
 	case errors.Is(err, domain.ErrInsufficientStock):
 		return http.StatusConflict, "INSUFFICIENT_STOCK", "insufficient stock for one or more items", nil
+
+	case errors.Is(err, domain.ErrUnauthorized):
+		return http.StatusUnauthorized, "UNAUTHORIZED", "invalid credentials", nil
+
+	case errors.Is(err, domain.ErrForbidden):
+		return http.StatusForbidden, "FORBIDDEN", "insufficient permissions", nil
+
 	case errors.Is(err, domain.ErrInvalidInput):
-		if ve, ok := errors.AsType[validator.ValidationErrors](err); ok {
-			fields := make(map[string]string, len(ve))
-			for _, fe := range ve {
-				fields[fe.Field()] = translateValidatorTag(fe.Tag())
-			}
-			return http.StatusUnprocessableEntity, "VALIDATION_FAILED", "invalid input parameters", fields
-		}
-		// Non-validator invalid input → sanitize. Never leak err.Error()
+		// Business rule violation from the service layer.
+		// Never leak err.Error() — may contain internal details.
 		return http.StatusBadRequest, "INVALID_INPUT", "invalid request parameters", nil
+
 	default:
-		// Unexpected error → log in handler, return generic 500
+		// Unknown error — already logged in the handler with full context.
+		// Generic message so internal details never reach the client.
 		return http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", nil
 	}
 }
@@ -70,8 +101,14 @@ func translateValidatorTag(tag string) string {
 		return "too long"
 	case "gt":
 		return "must be greater than 0"
+	case "gte":
+		return "must be zero or greater"
 	case "email":
 		return "must be a valid email"
+	case "uuid4":
+		return "must be a valid UUID"
+	case "dive":
+		return "contains invalid items"
 	default:
 		return "invalid value"
 	}
