@@ -1,33 +1,70 @@
-# Compiled Object files, Global libraries, Word lists, etc.
-*.a
-*.o
-*.6
-*.8
+# Include this file in your project root directory as: .gitignore
 
-# Compiled binaries
-# You can also use a specific directory like bin/
+# -----------------------------------------------------------------------------
+# Project Specific & AI Tools
+# -----------------------------------------------------------------------------
+# Antigravity test folder
+antigravity/
+
+# Claude AI configurations, contexts, and prompt caches
+.claude/
+claude.json
+.clauderules
+
+# -----------------------------------------------------------------------------
+# Go Binaries and Build Artifacts
+# -----------------------------------------------------------------------------
+# Compiled binaries/executables
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+
+# Common binary output names or directories
 bin/
+out/
+dist/
+main
+server
 
-# Test binary, built with `go test -c`
+# Test binaries and coverage reports
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+c.out
+coverage.txt
+coverage.html
 
-# Dependency directories (remove the # if you want to ignore vendor/)
+# -----------------------------------------------------------------------------
+# Go Specifics
+# -----------------------------------------------------------------------------
+# Dependency directories (Only ignore vendor/ if you do not want to check in dependencies)
 # vendor/
 
-# Local environment files
-.env
-.env.local
+# Go workspaces
+go.work
+go.work.sum
 
-# IDE/Editor specific files
-.vscode/
+# -----------------------------------------------------------------------------
+# Development Environment & IDEs
+# -----------------------------------------------------------------------------
+# JetBrains / GoLand
 .idea/
-*.swp
-*.swo
+*.iml
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+
+# Local Environment Secrets
+.env
+*.local.env
+.envrc
+
+# -----------------------------------------------------------------------------
+# Operating System Files
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
