@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -12,6 +14,7 @@ import (
 	"panzucha/internal/contextkeys"
 	"panzucha/internal/domain"
 	"panzucha/internal/httputil"
+	"panzucha/internal/middleware"
 	"panzucha/internal/services"
 )
 
@@ -20,45 +23,37 @@ type OrderHandler struct {
 	validate *validator.Validate
 }
 
-func NewOrderHandler(
-	svc services.OrderService,
-	v *validator.Validate,
-) *OrderHandler {
-	return &OrderHandler{
-		svc:      svc,
-		validate: v,
-	}
+func NewOrderHandler(svc services.OrderService, v *validator.Validate) *OrderHandler {
+	return &OrderHandler{svc: svc, validate: v}
 }
 
 func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
-	// ── Idempotency key from header ────────────────────────────────────────
-	// The key lives in the HTTP header — it never touches the request body
-	// or the domain entity. This is the only place it is read.
-	idempotencyKey := r.Header.Get("Idempotency-Key")
-	if idempotencyKey == "" {
-		httputil.RespondJSON(w, http.StatusBadRequest, httputil.ErrorBody("Idempotency-Key header is required"))
+	idempotencyKey, ok := middleware.GetIdempotencyKey(r.Context())
+	if !ok {
+		slog.ErrorContext(r.Context(), "idempotency key missing in context")
+		httputil.RespondError(w, domain.ErrInvalidInput)
 		return
 	}
 
-	// ── Decode and validate request body ──────────────────────────────────
 	var req createOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondJSON(w, http.StatusBadRequest, httputil.ErrorBody("invalid JSON"))
+		slog.WarnContext(r.Context(), "create_order: invalid json", "err", err)
+		httputil.RespondError(w, domain.ErrInvalidInput)
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		httputil.RespondJSON(w, http.StatusUnprocessableEntity, httputil.ValidationErrorBody(err))
+		slog.WarnContext(r.Context(), "create_order: validation failed", "err", err)
+		httputil.RespondError(w, err)
 		return
 	}
 
-	// ── Read caller identity from context (set by auth middleware) ─────────
 	userID, ok := contextkeys.GetUserID(r.Context())
 	if !ok {
-		httputil.RespondJSON(w, http.StatusUnauthorized, httputil.ErrorBody("unauthorized"))
+		slog.WarnContext(r.Context(), "create_order: missing auth context")
+		httputil.RespondError(w, domain.ErrUnauthorized)
 		return
 	}
 
-	// ── Build service input — idempotency key is part of the input ────────
 	input := services.CreateOrderInput{
 		OrderID:        uuid.NewString(),
 		UserID:         userID,
@@ -69,14 +64,23 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.svc.Create(r.Context(), input)
 	if err != nil {
-		// ErrConflict here means either:
-		//   a) key is "processing" — concurrent duplicate in flight
-		//   b) key is "completed"  — should not reach here (service replays)
-		// Both are correctly surfaced as 409.
+		switch {
+		case errors.Is(err, domain.ErrConflict):
+			// Warn — concurrent duplicate is expected behaviour, not a bug.
+			slog.WarnContext(r.Context(), "create_order: idempotency conflict",
+				"idempotency_key", idempotencyKey, "user_id", userID)
+		case errors.Is(err, domain.ErrInsufficientStock):
+			slog.WarnContext(r.Context(), "create_order: insufficient stock", "user_id", userID)
+		default:
+			slog.ErrorContext(r.Context(), "create_order: failed",
+				"err", err, "user_id", userID, "idempotency_key", idempotencyKey)
+		}
 		httputil.RespondError(w, err)
 		return
 	}
 
+	slog.InfoContext(r.Context(), "create_order: success",
+		"order_id", order.ID, "user_id", userID, "total", order.TotalAmount)
 	httputil.RespondJSON(w, http.StatusCreated, toOrderResponse(*order))
 }
 
@@ -85,16 +89,21 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "get_order: failed", "err", err, "order_id", id)
+		}
 		httputil.RespondError(w, err)
 		return
 	}
+
 	httputil.RespondJSON(w, http.StatusOK, toOrderResponse(*order))
 }
 
 func (h *OrderHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := contextkeys.GetUserID(r.Context())
 	if !ok {
-		httputil.RespondJSON(w, http.StatusUnauthorized, httputil.ErrorBody("unauthorized"))
+		slog.WarnContext(r.Context(), "list_orders: missing auth context")
+		httputil.RespondError(w, domain.ErrUnauthorized)
 		return
 	}
 
@@ -106,6 +115,8 @@ func (h *OrderHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
 
 	orders, err := h.svc.ListByUser(r.Context(), userID, limit, offset)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "list_orders: failed",
+			"err", err, "user_id", userID, "limit", limit, "offset", offset)
 		httputil.RespondError(w, err)
 		return
 	}
@@ -124,17 +135,25 @@ func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		Status string `json:"status" validate:"required"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondJSON(w, http.StatusBadRequest, httputil.ErrorBody("invalid JSON"))
+		slog.WarnContext(r.Context(), "update_order_status: invalid json", "err", err, "order_id", id)
+		httputil.RespondError(w, domain.ErrInvalidInput)
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		httputil.RespondJSON(w, http.StatusUnprocessableEntity, httputil.ValidationErrorBody(err))
+		slog.WarnContext(r.Context(), "update_order_status: validation failed", "err", err, "order_id", id)
+		httputil.RespondError(w, err)
 		return
 	}
 
 	if err := h.svc.UpdateStatus(r.Context(), id, domain.OrderStatus(req.Status)); err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "update_order_status: failed",
+				"err", err, "order_id", id, "status", req.Status)
+		}
 		httputil.RespondError(w, err)
 		return
 	}
+
+	slog.InfoContext(r.Context(), "update_order_status: success", "order_id", id, "status", req.Status)
 	w.WriteHeader(http.StatusNoContent)
 }

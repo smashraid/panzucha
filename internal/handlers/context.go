@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"panzucha/internal/auth"
 	"panzucha/internal/middleware"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -15,6 +17,13 @@ type RequestInfo struct {
 	UserAgent string
 	UserID    string
 }
+
+var (
+	ErrMissingIdempotencyKey = errors.New("idempotency key required")
+	ErrInvalidIdempotencyKey = errors.New("idempotency key format invalid")
+	// UUID-like or alphanumeric with dashes: 36-128 chars
+	idempotencyKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9\-_]{36,128}$`)
+)
 
 func ExtractRequestInfo(r *http.Request) *RequestInfo {
 	start := time.Now()
@@ -40,8 +49,16 @@ func ExtractRequestInfo(r *http.Request) *RequestInfo {
 func ExtractIdempotencyKey(r *http.Request) (string, error) {
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" {
-		return "", errors.New("missing Idempotency-Key header")
+		return "", ErrMissingIdempotencyKey
 	}
-	// Optional: validate UUID format
+
+	// Trim whitespace (clients sometimes send "key " with trailing space)
+	key = strings.TrimSpace(key)
+
+	// Validate format: prevent injection, overly long keys, or empty after trim
+	if !idempotencyKeyPattern.MatchString(key) {
+		return "", ErrInvalidIdempotencyKey
+	}
+
 	return key, nil
 }

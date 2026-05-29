@@ -3,67 +3,76 @@ package httputil
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"panzucha/internal/domain"
 
 	"github.com/go-playground/validator/v10"
 )
 
-// RespondJSON writes a JSON response with the given status code and data.
-// func RespondJSON(w http.ResponseWriter, status int, data any) {
-// 	w.Header().Set("Content-Type", "application/json")
-// 	w.WriteHeader(status)
-// 	if data != nil {
-// 		json.NewEncoder(w).Encode(data)
-// 	}
-// }
-
-// RespondRaw writes a raw response body with the given status code and content type.
-func RespondRaw(w http.ResponseWriter, statusCode int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(body)
+// Unified error envelope. Clients always get this shape.
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
 }
 
-func RespondJSON(w http.ResponseWriter, status int, body any) {
+func RespondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Error("failed to encode JSON response", "err", err)
+		http.Error(w, "internal encoding error", http.StatusInternalServerError)
+	}
 }
 
+// RespondError maps domain errors to HTTP status + safe client message.
+// CALLERS MUST LOG THE ERROR CONTEXT BEFORE CALLING THIS.
 func RespondError(w http.ResponseWriter, err error) {
+	status, code, msg, details := mapDomainError(err)
+	RespondJSON(w, status, APIError{Code: code, Message: msg, Details: details})
+}
+
+func mapDomainError(err error) (int, string, string, any) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		RespondJSON(w, http.StatusNotFound, ErrorBody("resource not found"))
+		return http.StatusNotFound, "NOT_FOUND", "resource not found", nil
 	case errors.Is(err, domain.ErrConflict):
-		RespondJSON(w, http.StatusConflict, ErrorBody("conflict"))
-	case errors.Is(err, domain.ErrVersionConflict):
-		RespondJSON(w, http.StatusConflict, ErrorBody("concurrent update detected, please retry"))
+		return http.StatusConflict, "CONFLICT", "resource conflict", nil
 	case errors.Is(err, domain.ErrUnauthorized):
-		RespondJSON(w, http.StatusUnauthorized, ErrorBody("unauthorized"))
+		return http.StatusUnauthorized, "UNAUTHORIZED", "invalid credentials", nil
 	case errors.Is(err, domain.ErrForbidden):
-		RespondJSON(w, http.StatusForbidden, ErrorBody("forbidden"))
+		return http.StatusForbidden, "FORBIDDEN", "insufficient permissions", nil
 	case errors.Is(err, domain.ErrInvalidInput):
-		RespondJSON(w, http.StatusUnprocessableEntity, ErrorBody(err.Error()))
-	default:
-		RespondJSON(w, http.StatusInternalServerError, ErrorBody("internal server error"))
-	}
-}
-
-type apiError struct {
-	Error string `json:"error"`
-}
-
-func ErrorBody(msg string) apiError { return apiError{Error: msg} }
-
-func ValidationErrorBody(err error) any {
-	var ve validator.ValidationErrors
-	if errors.As(err, &ve) {
-		fields := make(map[string]string, len(ve))
-		for _, fe := range ve {
-			fields[fe.Field()] = fe.Tag()
+		var ve validator.ValidationErrors
+		if errors.As(err, &ve) {
+			fields := make(map[string]string, len(ve))
+			for _, fe := range ve {
+				fields[fe.Field()] = translateValidatorTag(fe.Tag())
+			}
+			return http.StatusUnprocessableEntity, "VALIDATION_FAILED", "invalid input", fields
 		}
-		return map[string]any{"error": "validation failed", "fields": fields}
+		// Non-validator invalid input → sanitize
+		return http.StatusBadRequest, "INVALID_INPUT", "invalid input parameters", nil
+	default:
+		return http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", nil
 	}
-	return ErrorBody("validation failed")
+}
+
+// Translate internal validator tags to client-safe strings
+func translateValidatorTag(tag string) string {
+	switch tag {
+	case "required":
+		return "is required"
+	case "min":
+		return "too short"
+	case "max":
+		return "too long"
+	case "gt":
+		return "must be greater than 0"
+	case "email":
+		return "must be a valid email"
+	default:
+		return "invalid value"
+	}
 }
