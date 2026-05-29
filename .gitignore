@@ -68,3 +68,7 @@ go.work.sum
 # -----------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+
+# Your specific project binary
+api
+api.exe
