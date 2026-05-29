@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"panzucha/internal/handlers/dto"
-	"panzucha/internal/handlers/mapper"
 	"panzucha/internal/httputil"
 	"panzucha/internal/services"
 
@@ -33,7 +31,7 @@ func (h *ProductHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.RespondJSON(w, http.StatusOK, mapper.ToProductResponse(*product))
+	httputil.RespondJSON(w, http.StatusOK, toProductResponse(*product))
 }
 
 func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -49,11 +47,11 @@ func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.RespondJSON(w, http.StatusOK, mapper.ToProductListResponse(products, limit, offset))
+	httputil.RespondJSON(w, http.StatusOK, toProductListResponse(products, limit, offset))
 }
 
 func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req dto.CreateProductRequest
+	var req createProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondJSON(w, http.StatusBadRequest, httputil.ErrorBody("invalid JSON"))
 		return
@@ -63,9 +61,9 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert DTO → domain entity. The handler mapper fills business fields;
+	// Convert DTO → domain entity. The handler tills business fields;
 	// the service assigns ID and persists.
-	p := mapper.ToDomainProduct(req)
+	p := toDomainProduct(req)
 	p.ID = uuid.NewString()
 
 	if err := h.svc.Create(r.Context(), &p); err != nil {
@@ -73,13 +71,13 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.RespondJSON(w, http.StatusCreated, mapper.ToProductResponse(p))
+	httputil.RespondJSON(w, http.StatusCreated, toProductResponse(p))
 }
 
 func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	var req dto.UpdateProductRequest
+	var req updateProductRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondJSON(w, http.StatusBadRequest, httputil.ErrorBody("invalid JSON"))
 		return
@@ -96,13 +94,13 @@ func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated := mapper.ApplyProductUpdate(*existing, req)
+	updated := applyProductUpdate(*existing, req)
 	if err := h.svc.Update(r.Context(), &updated); err != nil {
 		httputil.RespondError(w, err)
 		return
 	}
 
-	httputil.RespondJSON(w, http.StatusOK, mapper.ToProductResponse(updated))
+	httputil.RespondJSON(w, http.StatusOK, toProductResponse(updated))
 }
 
 func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {

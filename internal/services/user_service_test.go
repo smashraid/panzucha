@@ -4,9 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"panzucha/internal/config"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
 	"panzucha/internal/services"
 )
 
@@ -65,12 +63,8 @@ func (m *mockUserRepository) Delete(ctx context.Context, id string) error {
 
 func TestRegisterAndLogin(t *testing.T) {
 	repo := newMockUserRepository()
-	cfg := &config.Config{
-		ServiceName: "test-user-service",
-		Environment: "development",
-	}
-	log := logger.New(cfg)
-	svc := services.NewUserService(repo, log)
+
+	svc := services.NewUserService(repo)
 
 	ctx := context.Background()
 
@@ -124,7 +118,8 @@ func TestRegisterAndLogin(t *testing.T) {
 	// 6. Test Update
 	newName := "Updated User Name"
 	newEmail := "updated@example.com"
-	updatedUser, err := svc.Update(ctx, user.ID, newEmail, newName)
+	newUpdatedBy := "admin"
+	updatedUser, err := svc.Update(ctx, user.ID, newEmail, newName, newUpdatedBy)
 	if err != nil {
 		t.Fatalf("failed to update user: %v", err)
 	}
