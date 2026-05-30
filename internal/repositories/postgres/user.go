@@ -21,7 +21,7 @@ func NewPostgresUserRepository(pool *pgxpool.Pool) *PostgresUserRepository {
 
 func (r *PostgresUserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	const q = `
-		SELECT id, email, name, password, role,
+		SELECT id, email, name, password_hash, role,
 		       created_at, created_by, updated_at, updated_by
 		FROM   users
 		WHERE  id = $1`
@@ -43,7 +43,7 @@ func (r *PostgresUserRepository) GetByID(ctx context.Context, id string) (*domai
 
 func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	const q = `
-		SELECT id, email, name, password, role,
+		SELECT id, email, name, password_hash, role,
 		       created_at, created_by, updated_at, updated_by
 		FROM   users
 		WHERE  email = $1`
@@ -70,7 +70,7 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 // to domain.ErrConflict so the service/handler never see a raw DB error.
 func (r *PostgresUserRepository) Create(ctx context.Context, u *domain.User) error {
 	const q = `
-		INSERT INTO users (id, email, name, password, role, created_at, created_by, updated_at, updated_by)
+		INSERT INTO users (id, email, name, password_hash, role, created_at, created_by, updated_at, updated_by)
 		VALUES ($1, $2, $3, $4, $5, NOW(), $6, NOW(), $6)
 		RETURNING created_at, updated_at`
 
