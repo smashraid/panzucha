@@ -3,234 +3,119 @@ package services
 import (
 	"context"
 	"errors"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+
 	"panzucha/internal/auth"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
-	"panzucha/internal/metrics"
-	"time"
 )
 
 type UserService interface {
 	Register(ctx context.Context, email, name, password string) (*domain.User, error)
-	Login(ctx context.Context, email, password string) (string, error) // returns JWT token
+	Login(ctx context.Context, email, password string) (string, error)
 	GetByID(ctx context.Context, id string) (*domain.User, error)
-	Update(ctx context.Context, id, email, name string) (*domain.User, error)
+	Update(ctx context.Context, id, email, name, updatedBy string) (*domain.User, error)
+	Delete(ctx context.Context, id string) error
 }
 
 type userService struct {
-	repo   domain.UserRepository
-	logger *logger.Logger
+	repo domain.UserRepository
 }
 
-func NewUserService(repo domain.UserRepository, log *logger.Logger) UserService {
-	return &userService{repo: repo, logger: log}
+func NewUserService(repo domain.UserRepository) UserService {
+	return &userService{repo: repo}
 }
 
+// Register creates a new user account.
+//
+// Uniqueness check order:
+//  1. Service calls GetByEmail — catches the common case with one round-trip.
+//  2. If two concurrent requests both pass step 1 before either inserts,
+//     the DB UNIQUE constraint fires and the repo translates it to ErrConflict.
+//     Both paths surface the same ErrConflict to the handler.
 func (s *userService) Register(ctx context.Context, email, name, password string) (*domain.User, error) {
-	existing, _ := s.repo.GetByEmail(ctx, email)
+	// Step 1 — check uniqueness at the service layer.
+	existing, err := s.repo.GetByEmail(ctx, email)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		// Real DB error — propagate, don't swallow.
+		return nil, err
+	}
 	if existing != nil {
-		return nil, errors.New("email already registered")
+		return nil, domain.ErrConflict
+	}
+
+	// Step 2 — hash the password in the service, never in the domain entity.
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
 	}
 
 	user := &domain.User{
-		ID:        domain.NewUserID(),
-		Email:     email,
-		Name:      name,
-		Password:  password,
-		Role:      "user",
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}
-
-	if err := user.ValidateForCreate(); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityCreate,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     logger.MsgBusinessValidationFailed,
-			Err:         err,
-		})
-		return nil, err
-	}
-	if err := user.HashPassword(); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityCreate,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     "failed to hash password",
-			Err:         err,
-		})
-		return nil, err
+		ID:           uuid.NewString(),
+		Email:        email,
+		Name:         name,
+		PasswordHash: string(hash),
+		Role:         "user",
+		Audit:        domain.Audit{CreatedBy: email, UpdatedBy: email},
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityCreate,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     logger.MsgBusinessCreateFailed,
-			Err:         err,
-		})
+		// Step 3 — if a concurrent insert beat us, repo returns ErrConflict.
 		return nil, err
 	}
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityCreate,
-		EntityType:  "user",
-		EntityID:    user.ID,
-		Message:     logger.MsgBusinessCreated,
-		Err:         nil,
-	})
-	user.Password = ""
-	metrics.UsersCreated.WithLabelValues(user.Role).Inc()
 	return user, nil
 }
 
+// Login authenticates a user and returns a signed JWT token.
+// Both "user not found" and "wrong password" surface as ErrUnauthorized —
+// never reveal which one failed to the client.
 func (s *userService) Login(ctx context.Context, email, password string) (string, error) {
 	user, err := s.repo.GetByEmail(ctx, email)
-	if err != nil || user == nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "user",
-			EntityID:    email,
-			Message:     logger.MsgBusinessNotFound,
-			Err:         err,
-		})
-		return "", errors.New("invalid credentials")
-	}
-
-	if !user.CheckPassword(password) {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     "invalid password",
-			Err:         nil,
-		})
-		return "", errors.New("invalid credentials")
-	}
-
-	roles := []string{user.Role}
-	token, err := auth.GenerateToken(user.ID, user.Email, roles)
 	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     "token generation failed",
-			Err:         err,
-		})
+		// Distinguish a real DB error from "user not found".
+		// ErrNotFound → wrong credentials → ErrUnauthorized.
+		// Any other error → infrastructure failure → propagate.
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", domain.ErrUnauthorized
+		}
 		return "", err
 	}
 
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityGet,
-		EntityType:  "user",
-		EntityID:    user.ID,
-		Message:     "user logged in successfully",
-		Err:         nil,
-	})
+	// bcrypt comparison lives here, not on the domain entity.
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return "", domain.ErrUnauthorized
+	}
+
+	token, err := auth.GenerateToken(user.ID, user.Email, []string{user.Role})
+	if err != nil {
+		return "", err
+	}
 	return token, nil
 }
 
 func (s *userService) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	user, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "user",
-			EntityID:    user.ID,
-			Message:     logger.MsgBusinessDatabaseError,
-			Err:         err,
-		})
-		return nil, err
-	}
-	if user == nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "user",
-			EntityID:    id,
-			Message:     logger.MsgBusinessNotFound,
-			Err:         nil,
-		})
-		return nil, errors.New(logger.MsgBusinessNotFound)
-	}
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityGet,
-		EntityType:  "user",
-		EntityID:    user.ID,
-		Message:     logger.MsgBusinessGetFailed,
-		Err:         nil,
-	})
-	user.Password = ""
-	return user, nil
+	return s.repo.GetByID(ctx, id)
 }
 
-func (s *userService) Update(ctx context.Context, id, email, name string) (*domain.User, error) {
-	user, err := s.repo.GetByID(ctx, id)
-	if err != nil || user == nil {
-		return nil, errors.New(logger.MsgBusinessNotFound)
-	}
-
-	oldEmail := user.Email
-	oldName := user.Name
-	user.Email = email
-	user.Name = name
-
-	if err := user.ValidateForUpdate(); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "user",
-			EntityID:    id,
-			Message:     logger.MsgBusinessValidationFailed,
-			Err:         err,
-		})
-		return nil, err
+// Update applies email and name changes to an existing user.
+// No GetByID before Update — the repository checks existence implicitly
+// via RowsAffected and returns ErrNotFound if the user no longer exists.
+// This keeps the operation at one DB round-trip on the happy path.
+func (s *userService) Update(ctx context.Context, id, email, name, updatedBy string) (*domain.User, error) {
+	user := &domain.User{
+		ID:    id,
+		Email: email,
+		Name:  name,
+		Audit: domain.Audit{UpdatedBy: updatedBy},
 	}
 
 	if err := s.repo.Update(ctx, user); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "user",
-			EntityID:    id,
-			Message:     logger.MsgBusinessUpdateFailed,
-			Err:         err,
-		})
 		return nil, err
 	}
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityUpdate,
-		EntityType:  "user",
-		EntityID:    id,
-		Message:     "Data Updated (email: " + oldEmail + "→" + email + ", name: " + oldName + "→" + name + ")",
-		Err:         nil,
-	})
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityUpdate,
-		EntityType:  "user",
-		EntityID:    id,
-		Message:     logger.MsgBusinessUpdated,
-		Err:         nil,
-	})
-	user.Password = ""
-	metrics.UsersUpdated.Inc()
 	return user, nil
+}
+
+func (s *userService) Delete(ctx context.Context, id string) error {
+	return s.repo.Delete(ctx, id)
 }

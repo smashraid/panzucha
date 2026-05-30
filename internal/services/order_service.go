@@ -2,253 +2,204 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
-	"panzucha/internal/metrics"
+	"panzucha/internal/repositories/postgres"
+	"time"
 )
 
+type CreateOrderInput struct {
+	OrderID        string
+	UserID         string
+	Items          []domain.OrderItem
+	IdempotencyKey string
+	CreatedBy      string
+}
+
 type OrderService interface {
-	Create(ctx context.Context, order *domain.Order) error
+	Create(ctx context.Context, req CreateOrderInput) (*domain.Order, error)
 	GetByID(ctx context.Context, id string) (*domain.Order, error)
-	GetByUserID(ctx context.Context, userID string) ([]domain.Order, error)
+	ListByUser(ctx context.Context, userID string, limit, offset int) ([]domain.Order, error)
 	UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error
-	List(ctx context.Context) ([]domain.Order, error)
 }
 
 type orderService struct {
-	repo   domain.OrderRepository
-	logger *logger.Logger
+	transactor      postgres.Transactor // owned here to begin transactions
+	orderRepo       domain.OrderRepository
+	productRepo     domain.ProductRepository
+	idempotencyRepo domain.IdempotencyKeyRepository
 }
 
-// Fixed constructor – now accepts domain.OrderRepository
-func NewOrderService(repo domain.OrderRepository, log *logger.Logger) OrderService {
-	return &orderService{repo: repo, logger: log}
+func NewOrderService(
+	transactor postgres.Transactor,
+	orderRepo domain.OrderRepository,
+	productRepo domain.ProductRepository,
+	idempotencyRepo domain.IdempotencyKeyRepository,
+) OrderService {
+	return &orderService{
+		transactor:      transactor,
+		orderRepo:       orderRepo,
+		productRepo:     productRepo,
+		idempotencyRepo: idempotencyRepo,
+	}
 }
 
-func (s *orderService) Create(ctx context.Context, o *domain.Order) error {
-	if err := o.ValidateForCreate(); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityCreate,
-			EntityType:  "order",
-			EntityID:    o.ID,
-			Message:     logger.MsgBusinessValidationFailed,
-			Err:         err,
-		})
-		return err
+func (s *orderService) Create(ctx context.Context, input CreateOrderInput) (*domain.Order, error) {
+
+	// ── Step 1: Idempotency check ─────────────────────────────────────────
+	existing, err := s.idempotencyRepo.FindByKey(ctx, input.IdempotencyKey)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	if existing != nil {
+		switch existing.Status {
+		case domain.IdempotencyStatusCompleted:
+			return replayOrder(existing)
+		case domain.IdempotencyStatusProcessing:
+			return nil, domain.ErrConflict
+		}
 	}
 
-	err := s.repo.Create(ctx, o)
+	// ── Step 2: Register key as "processing" ──────────────────────────────
+	idempotencyEntry := &domain.IdempotencyKey{
+		Key:          input.IdempotencyKey,
+		ResourceType: "order",
+		ExpiresAt:    time.Now().Add(24 * time.Hour),
+	}
+	if err := s.idempotencyRepo.Create(ctx, idempotencyEntry); err != nil {
+		return nil, err
+	}
+
+	// Any failure after this point deletes the key so the client can retry.
+	var svcErr error
+	defer func() {
+		if svcErr != nil {
+			_ = s.idempotencyRepo.Delete(ctx, input.IdempotencyKey)
+		}
+	}()
+
+	// ── Step 3: Validate items and snapshot prices ────────────────────────
+	if len(input.Items) == 0 {
+		svcErr = domain.ErrInvalidInput
+		return nil, svcErr
+	}
+
+	total, err := s.snapshotPricesAndTotal(ctx, input.Items)
 	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityCreate,
-			EntityType:  "order",
-			EntityID:    o.ID,
-			Message:     logger.MsgBusinessCreateFailed,
-			Err:         err,
-		})
-		return err
+		svcErr = err
+		return nil, svcErr
 	}
 
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityCreate,
-		EntityType:  "order",
-		EntityID:    o.ID,
-		Message:     logger.MsgBusinessCreated,
-		Err:         nil,
-	})
-	metrics.OrdersCreated.Inc()
-	metrics.OrdersTotalPrice.Add(o.TotalPrice)
-	// If status is pending, increment pending gauge
-	if o.Status == domain.OrderStatusPending {
-		metrics.UpdatePendingOrdersGauge(1)
-	}
-	return nil
-}
-
-func (s *orderService) GetByID(ctx context.Context, id string) (*domain.Order, error) {
-	if id == "" {
-		err := errors.New(logger.MsgBusinessInvalidIdentifier)
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
-		return nil, err
-	}
-
-	order, err := s.repo.GetByID(ctx, id)
+	// ── Step 4: Begin transaction ─────────────────────────────────────────
+	// Transactor.BeginTx — no pgxpool in this file.
+	tx, err := s.transactor.BeginTx(ctx)
 	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
-		return nil, err
+		svcErr = err
+		return nil, svcErr
 	}
-	if order == nil {
-		err := errors.New(logger.MsgBusinessNotFound) // fixed: not found, not invalid identifier
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityGet,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
-		return nil, err
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+
+	// ── Step 5: Decrement stock for every item (inside tx) ────────────────
+	for _, item := range input.Items {
+		product, err := s.productRepo.GetByID(ctx, item.ProductID)
+		if err != nil {
+			svcErr = err
+			return nil, svcErr
+		}
+		if err := s.productRepo.DecrementStock(ctx, product.ID, item.Quantity, product.Version); err != nil {
+			svcErr = err
+			return nil, svcErr
+		}
 	}
 
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityGet,
-		EntityType:  "order",
-		EntityID:    id,
-		Message:     logger.MsgBusinessRetrieved,
-		Err:         nil,
-	})
+	// ── Step 6: Insert order (inside tx) ─────────────────────────────────
+	order := &domain.Order{
+		ID:          input.OrderID,
+		UserID:      input.UserID,
+		Items:       input.Items,
+		Status:      domain.OrderStatusPending,
+		TotalAmount: total,
+		Audit:       domain.Audit{CreatedBy: input.CreatedBy, UpdatedBy: input.CreatedBy},
+	}
+	if err := s.orderRepo.Create(ctx, tx, order); err != nil {
+		svcErr = err
+		return nil, svcErr
+	}
+
+	// ── Step 7: Mark key completed (inside tx) ────────────────────────────
+	responseBody, err := json.Marshal(order)
+	if err != nil {
+		svcErr = err
+		return nil, svcErr
+	}
+	if err := s.idempotencyRepo.UpdateToCompleted(ctx, tx, input.IdempotencyKey, order.ID, 201, responseBody); err != nil {
+		svcErr = err
+		return nil, svcErr
+	}
+
+	// ── Step 8: Commit ────────────────────────────────────────────────────
+	if err := tx.Commit(ctx); err != nil {
+		svcErr = err
+		return nil, svcErr
+	}
+
 	return order, nil
 }
 
-func (s *orderService) GetByUserID(ctx context.Context, userID string) ([]domain.Order, error) {
-	orders, err := s.repo.GetByUserID(ctx, userID)
-	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityList,
-			EntityType:  "order",
-			EntityID:    "",
-			Message:     logger.MsgBusinessListFailed,
-			Err:         err,
-		})
-		return nil, err
-	}
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityList,
-		EntityType:  "order",
-		EntityID:    "",
-		Message:     logger.MsgBusinessListed, // fixed: success message
-		Err:         nil,
-	})
-	return orders, nil
+func (s *orderService) GetByID(ctx context.Context, id string) (*domain.Order, error) {
+	return s.orderRepo.GetByID(ctx, id)
 }
 
-// UpdateStatus – implements status change with business validation
+func (s *orderService) ListByUser(ctx context.Context, userID string, limit, offset int) ([]domain.Order, error) {
+	return s.orderRepo.ListByUser(ctx, userID, limit, offset)
+}
+
 func (s *orderService) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
-	if id == "" {
-		err := errors.New(logger.MsgBusinessInvalidIdentifier)
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
+	if err := validateStatusTransition(status); err != nil {
 		return err
 	}
-
-	order, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     "failed to fetch order",
-			Err:         err,
-		})
-		return err
-	}
-	if order == nil {
-		err := errors.New(logger.MsgBusinessNotFound)
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
-		return err
-	}
-
-	oldStatus := order.Status
-	if err := order.ValidateForUpdateStatus(status); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     err.Error(),
-			Err:         err,
-		})
-		return err
-	}
-
-	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityUpdate,
-			EntityType:  "order",
-			EntityID:    id,
-			Message:     logger.MsgBusinessUpdateFailed,
-			Err:         err,
-		})
-		return err
-	}
-
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityUpdate,
-		EntityType:  "order",
-		EntityID:    id,
-		Message:     logger.MsgBusinessUpdated,
-		Err:         nil,
-	})
-
-	metrics.IncrementOrderStatusChange(string(oldStatus), string(status))
-	// Update pending gauge
-	if oldStatus == domain.OrderStatusPending && status != domain.OrderStatusPending {
-		metrics.UpdatePendingOrdersGauge(-1)
-	} else if oldStatus != domain.OrderStatusPending && status == domain.OrderStatusPending {
-		metrics.UpdatePendingOrdersGauge(1)
-	}
-	return nil
+	return s.orderRepo.UpdateStatus(ctx, id, status)
 }
 
-func (s *orderService) List(ctx context.Context) ([]domain.Order, error) {
-	orders, err := s.repo.List(ctx)
-	if err != nil {
-		s.logger.LogBusiness(logger.BusinessLogParams{
-			Ctx:         ctx,
-			SubCategory: logger.BusinessEntityList,
-			EntityType:  "order",
-			EntityID:    "",
-			Message:     logger.MsgBusinessListFailed,
-			Err:         err,
-		})
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+// snapshotPricesAndTotal fetches the current price for each item from the
+// product repo and writes it onto the item. The client sends only product_id
+// and quantity — never a price. This prevents price manipulation and ensures
+// the persisted order reflects what the customer paid at time of purchase.
+func (s *orderService) snapshotPricesAndTotal(ctx context.Context, items []domain.OrderItem) (float64, error) {
+	var total float64
+	for i, item := range items {
+		if item.Quantity <= 0 {
+			return 0, domain.ErrInvalidInput
+		}
+		product, err := s.productRepo.GetByID(ctx, item.ProductID)
+		if err != nil {
+			return 0, err
+		}
+		items[i].UnitPrice = product.Price
+		total += product.Price * float64(item.Quantity)
+	}
+	return total, nil
+}
+
+func replayOrder(key *domain.IdempotencyKey) (*domain.Order, error) {
+	var o domain.Order
+	if err := json.Unmarshal(key.ResponseBody, &o); err != nil {
 		return nil, err
 	}
+	return &o, nil
+}
 
-	s.logger.LogBusiness(logger.BusinessLogParams{
-		Ctx:         ctx,
-		SubCategory: logger.BusinessEntityList,
-		EntityType:  "order",
-		EntityID:    "",
-		Message:     logger.MsgBusinessListed,
-		Err:         nil,
-	})
-	return orders, nil
+func validateStatusTransition(status domain.OrderStatus) error {
+	switch status {
+	case domain.OrderStatusPending,
+		domain.OrderStatusConfirmed,
+		domain.OrderStatusShipped,
+		domain.OrderStatusCancelled:
+		return nil
+	default:
+		return domain.ErrInvalidInput
+	}
 }

@@ -8,15 +8,15 @@ import (
 	"os/signal"
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
-	"panzucha/internal/logger"
 	"panzucha/internal/messaging"
-	repositories "panzucha/internal/repositories/postgres"
+	"panzucha/internal/repositories/postgres"
 
 	"panzucha/internal/server"
 	"panzucha/internal/services"
 	"syscall"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -28,7 +28,7 @@ func main() {
 	stdLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(stdLogger)
 
-	log := logger.New(cfg)
+	//log := logger.New(cfg)
 	// defer log.Close()
 
 	rabbitMQ := messaging.NewRabbitMQ(cfg.RabbitMQURL)
@@ -46,21 +46,23 @@ func main() {
 	}
 	defer pool.Close()
 
+	validate := validator.New()
+	transactor := postgres.NewPgxTransactor(pool)
+
 	// 4. Repository -> Service -> Handler
-	userRepo := repositories.NewPostgresUserRepository(pool, log)
-	userService := services.NewUserService(userRepo, log)
-	userHandler := handlers.NewUserHandler(userService, log)
+	userRepo := postgres.NewPostgresUserRepository(pool)
+	userService := services.NewUserService(userRepo)
+	userHandler := handlers.NewUserHandler(userService, validate)
 
-	productRepo := repositories.NewPostgresProductRepository(pool, log)
-	productService := services.NewProductService(productRepo, log)
-	productHandler := handlers.NewProductHandler(productService, log)
+	productRepo := postgres.NewPostgresProductRepository(pool)
+	productService := services.NewProductService(productRepo)
+	productHandler := handlers.NewProductHandler(productService, validate)
 
-	idempotencyRepo := repositories.NewPostgresIdempotencyKeyRepository(pool, log)
-	idempotencyService := services.NewIdempotencyService(idempotencyRepo)
+	idempotencyRepo := postgres.NewPostgresIdempotencyKeyRepository(pool)
 
-	orderRepo := repositories.NewPostgresOrderRepository(pool, log)
-	orderService := services.NewOrderService(orderRepo, log)
-	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, idempotencyService, log)
+	orderRepo := postgres.NewPostgresOrderRepository(pool)
+	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo)
+	orderHandler := handlers.NewOrderHandler(orderService, validate)
 
 	// 5. Router (chi)
 	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)

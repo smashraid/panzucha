@@ -1,560 +1,159 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
-	"time"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 
-	"panzucha/internal/auth"
+	"panzucha/internal/contextkeys"
 	"panzucha/internal/domain"
-	"panzucha/internal/handlers/dto"
-	"panzucha/internal/handlers/mapper"
 	"panzucha/internal/httputil"
-	"panzucha/internal/logger"
+	"panzucha/internal/middleware"
 	"panzucha/internal/services"
-	"panzucha/internal/validation"
 )
 
 type OrderHandler struct {
-	orderService       services.OrderService
-	productService     services.ProductService
-	userService        services.UserService
-	idempotencyService services.IdempotencyService
-	logger             *logger.Logger
+	svc      services.OrderService
+	validate *validator.Validate
 }
 
-func NewOrderHandler(
-	orderService services.OrderService,
-	productService services.ProductService,
-	userService services.UserService,
-	idempotencyService services.IdempotencyService,
-	log *logger.Logger,
-) *OrderHandler {
-	return &OrderHandler{
-		orderService:       orderService,
-		productService:     productService,
-		userService:        userService,
-		idempotencyService: idempotencyService,
-		logger:             log,
-	}
+func NewOrderHandler(svc services.OrderService, v *validator.Validate) *OrderHandler {
+	return &OrderHandler{svc: svc, validate: v}
 }
 
-// Create handles POST /orders
 func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	idempotencyKey, err := ExtractIdempotencyKey(r)
-	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgIdempotencyNotFound,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgIdempotencyNotFound, http.StatusBadRequest)
-		return
-	}
-
-	// Phase 1: Reserve the key
-	isOwner, cached, err := h.idempotencyService.Reserve(r.Context(), idempotencyKey)
-	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgIdempotencyReservationFailed,
-			Payload:    nil,
-			Custom: map[string]any{
-				"isOwner":  isOwner,
-				"isCached": cached != nil,
-			},
-		})
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	if !isOwner {
-		if cached != nil {
-			// Key already completed – return cached response
-			httputil.RespondRaw(w, cached.ResponseStatus, cached.ResponseBody)
-			return
-		}
-		// Key is still processing by another request
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgIdempotencyProcessing,
-			Payload:    nil,
-			Custom: map[string]any{
-				"isOwner": isOwner,
-			},
-		})
-		http.Error(w, "request already in progress, please retry", http.StatusConflict)
-		return
-	}
-
-	// Phase 2: Process the order (business logic)
-	var req dto.CreateOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
-		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
-		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
-		return
-	}
-
-	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
-		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Verify user exists
-	_, err = h.userService.GetByID(r.Context(), info.UserID)
-	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    "user not found",
-			Payload:    req,
-		})
-		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
-		http.Error(w, "user not found", http.StatusBadRequest)
-		return
-	}
-
-	// Verify product exists and get its price
-	product, err := h.productService.GetByID(r.Context(), req.ProductID)
-	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    "product not found",
-			Payload:    req,
-		})
-		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
-		http.Error(w, "product not found", http.StatusBadRequest)
-		return
-	}
-
-	// Create order domain object
-	order := mapper.FromCreateOrderRequest(&req, info.UserID)
-	order.TotalPrice = product.Price * float64(order.Quantity)
-
-	if err := h.orderService.Create(r.Context(), order); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusInternalServerError,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    "failed to create order",
-			Payload:    req,
-		})
-		_ = h.idempotencyService.Delete(r.Context(), idempotencyKey)
-		http.Error(w, "failed to create order", http.StatusInternalServerError)
-		return
-	}
-
-	// Phase 3: Complete the key with final response
-	resp := mapper.FromDomainToOrderResponse(order)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusCreated,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessCreated,
-		Payload:    req,
-	})
-
-	respBody, _ := json.Marshal(resp)
-	if err := h.idempotencyService.Complete(r.Context(), idempotencyKey, "order", order.ID, http.StatusCreated, respBody); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusCreated,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgIdempotencyCreateFailed,
-			Payload:    req,
-		})
-	}
-	httputil.RespondJSON(w, http.StatusCreated, resp)
-}
-
-// GetByID handles GET /orders/{id}
-func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	orderID := chi.URLParam(r, "id")
-
-	if orderID == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
-		return
-	}
-
-	order, err := h.orderService.GetByID(r.Context(), orderID)
-	if err != nil {
-		status := http.StatusNotFound
-		msg := logger.MsgBusinessNotFound
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    nil,
-		})
-		http.Error(w, msg, status)
-		return
-	}
-
-	// Ensure the authenticated user owns the order (or is admin)
-	if order.UserID != info.UserID && !isAdmin(r.Context()) {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusForbidden,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessForbidden,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessForbidden, http.StatusForbidden)
-		return
-	}
-
-	resp := mapper.FromDomainToOrderResponse(order)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessRetrieved,
-		Payload:    nil,
-	})
-	httputil.RespondJSON(w, http.StatusOK, resp)
-}
-
-// ListByUser handles GET /users/{userID}/orders
-func (h *OrderHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	userID := chi.URLParam(r, "userID")
-
-	if userID == "" {
-		userID = info.UserID // default to authenticated user if not provided
-	}
-
-	// Only allow admin or the user themselves
-	if userID != info.UserID && !isAdmin(r.Context()) {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusForbidden,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessForbidden,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessForbidden, http.StatusForbidden)
-		return
-	}
-
-	orders, err := h.orderService.GetByUserID(r.Context(), userID)
-	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusInternalServerError,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessListFailed,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInternalError, http.StatusInternalServerError)
-		return
-	}
-
-	resp := make([]dto.OrderResponse, len(orders))
-	for i, o := range orders {
-		resp[i] = *mapper.FromDomainToOrderResponse(&o)
-	}
-
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessListed,
-		Payload:    nil,
-	})
-	httputil.RespondJSON(w, http.StatusOK, resp)
-}
-
-// UpdateStatus handles PUT /orders/{id}/status
-func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	orderID := chi.URLParam(r, "id")
-
-	if orderID == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
-		return
-	}
-
-	var req dto.UpdateOrderStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
-		return
-	}
-
-	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Admin-only or role-based – for simplicity, only admin can update status
-	if !isAdmin(r.Context()) {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusForbidden,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessForbidden,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessForbidden, http.StatusForbidden)
-		return
-	}
-
-	if err := h.orderService.UpdateStatus(r.Context(), orderID, req.Status); err != nil {
-		status := http.StatusBadRequest
-		msg := err.Error()
-		if err == domain.ErrNotFound {
-			status = http.StatusNotFound
-			msg = logger.MsgBusinessNotFound
-		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    req,
-		})
-		http.Error(w, msg, status)
-		return
-	}
-
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessUpdated,
-		Payload:    req,
-	})
-	httputil.RespondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-// Helper to check if user has admin role (implement based on your auth context)
-func isAdmin(ctx context.Context) bool {
-	roles, ok := auth.RolesFromContext(ctx)
+	idempotencyKey, ok := middleware.GetIdempotencyKey(r.Context())
 	if !ok {
-		return false
+		slog.ErrorContext(r.Context(), "idempotency key missing in context")
+		httputil.RespondError(w, domain.ErrInvalidInput)
+		return
 	}
-	for _, r := range roles {
-		if r == "admin" {
-			return true
+
+	var req createOrderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.WarnContext(r.Context(), "create_order: invalid json", "err", err)
+		httputil.RespondError(w, domain.ErrInvalidInput)
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		slog.WarnContext(r.Context(), "create_order: validation failed", "err", err)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	userID, ok := contextkeys.GetUserID(r.Context())
+	if !ok {
+		slog.WarnContext(r.Context(), "create_order: missing auth context")
+		httputil.RespondError(w, domain.ErrUnauthorized)
+		return
+	}
+
+	input := services.CreateOrderInput{
+		OrderID:        uuid.NewString(),
+		UserID:         userID,
+		Items:          toDomainOrderItems(req.Items),
+		IdempotencyKey: idempotencyKey,
+		CreatedBy:      userID,
+	}
+
+	order, err := h.svc.Create(r.Context(), input)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrConflict):
+			// Warn — concurrent duplicate is expected behaviour, not a bug.
+			slog.WarnContext(r.Context(), "create_order: idempotency conflict",
+				"idempotency_key", idempotencyKey, "user_id", userID)
+		case errors.Is(err, domain.ErrInsufficientStock):
+			slog.WarnContext(r.Context(), "create_order: insufficient stock", "user_id", userID)
+		default:
+			slog.ErrorContext(r.Context(), "create_order: failed",
+				"err", err, "user_id", userID, "idempotency_key", idempotencyKey)
 		}
+		httputil.RespondError(w, err)
+		return
 	}
-	return false
+
+	slog.InfoContext(r.Context(), "create_order: success",
+		"order_id", order.ID, "user_id", userID, "total", order.TotalAmount)
+	httputil.RespondJSON(w, http.StatusCreated, toOrderResponse(*order))
+}
+
+func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	order, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "get_order: failed", "err", err, "order_id", id)
+		}
+		httputil.RespondError(w, err)
+		return
+	}
+
+	httputil.RespondJSON(w, http.StatusOK, toOrderResponse(*order))
+}
+
+func (h *OrderHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := contextkeys.GetUserID(r.Context())
+	if !ok {
+		slog.WarnContext(r.Context(), "list_orders: missing auth context")
+		httputil.RespondError(w, domain.ErrUnauthorized)
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	orders, err := h.svc.ListByUser(r.Context(), userID, limit, offset)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list_orders: failed",
+			"err", err, "user_id", userID, "limit", limit, "offset", offset)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	resp := make([]orderResponse, len(orders))
+	for i, o := range orders {
+		resp[i] = toOrderResponse(o)
+	}
+	httputil.RespondJSON(w, http.StatusOK, resp)
+}
+
+func (h *OrderHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		Status string `json:"status" validate:"required"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.WarnContext(r.Context(), "update_order_status: invalid json", "err", err, "order_id", id)
+		httputil.RespondError(w, domain.ErrInvalidInput)
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		slog.WarnContext(r.Context(), "update_order_status: validation failed", "err", err, "order_id", id)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	if err := h.svc.UpdateStatus(r.Context(), id, domain.OrderStatus(req.Status)); err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "update_order_status: failed",
+				"err", err, "order_id", id, "status", req.Status)
+		}
+		httputil.RespondError(w, err)
+		return
+	}
+
+	slog.InfoContext(r.Context(), "update_order_status: success", "order_id", id, "status", req.Status)
+	w.WriteHeader(http.StatusNoContent)
 }

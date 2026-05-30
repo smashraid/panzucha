@@ -1,132 +1,65 @@
-package repositories
+package postgres
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"panzucha/internal/domain"
-	"panzucha/internal/logger"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresOrderRepository struct {
-	pool   *pgxpool.Pool
-	logger *logger.Logger
+	pool *pgxpool.Pool
 }
 
 var _ domain.OrderRepository = (*PostgresOrderRepository)(nil)
 
-func NewPostgresOrderRepository(pool *pgxpool.Pool, log *logger.Logger) *PostgresOrderRepository {
-	return &PostgresOrderRepository{pool: pool, logger: log}
+func NewPostgresOrderRepository(pool *pgxpool.Pool) *PostgresOrderRepository {
+	return &PostgresOrderRepository{pool: pool}
 }
 
-// Create inserts a new order.
-func (r *PostgresOrderRepository) Create(ctx context.Context, o *domain.Order) error {
-	start := time.Now()
-	if o.ID == "" {
-		o.ID = domain.NewOrderID()
-	}
-
-	now := time.Now().UTC()
-	o.CreatedAt = now
-	o.UpdatedAt = now
-
-	query := `INSERT INTO orders (id, user_id, product_id, quantity, total_price, status, created_at, updated_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-
-	_, err := r.pool.Exec(ctx, query,
-		o.ID, o.UserID, o.ProductID, o.Quantity, o.TotalPrice, o.Status, o.CreatedAt, o.UpdatedAt)
-
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected = 1
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBInsert,
-		Table:        "orders",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom:       map[string]any{"method": "create"},
-	})
-	return err
-}
-
-// GetByID retrieves a single order by ID.
 func (r *PostgresOrderRepository) GetByID(ctx context.Context, id string) (*domain.Order, error) {
-	start := time.Now()
-	var o domain.Order
-	query := `SELECT id, user_id, product_id, quantity, total_price, status, created_at, updated_at
-              FROM orders WHERE id = $1`
-	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&o.ID, &o.UserID, &o.ProductID, &o.Quantity, &o.TotalPrice, &o.Status,
-		&o.CreatedAt, &o.UpdatedAt,
-	)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
+	const q = `
+		SELECT id, user_id, items, status, total_amount,
+		       created_at, created_by, updated_at, updated_by
+		FROM   orders
+		WHERE  id = $1`
 
-	if errors.Is(err, sql.ErrNoRows) {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          nil,
-			Custom:       map[string]any{"method": "get_by_id"},
-		})
-		return nil, nil
-	}
+	var o domain.Order
+	var itemsJSON []byte
+
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&o.ID, &o.UserID, &itemsJSON, &o.Status, &o.TotalAmount,
+		&o.Audit.CreatedAt, &o.Audit.CreatedBy,
+		&o.Audit.UpdatedAt, &o.Audit.UpdatedBy,
+	)
 	if err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom:       map[string]any{"method": "get_by_id"},
-		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
 		return nil, err
 	}
 
-	rowsAffected = 1
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBSelect,
-		Table:        "orders",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          nil,
-		Custom:       map[string]any{"method": "get_by_id"},
-	})
+	if err := json.Unmarshal(itemsJSON, &o.Items); err != nil {
+		return nil, err
+	}
 	return &o, nil
 }
 
-// GetByUserID returns all orders for a specific user.
-func (r *PostgresOrderRepository) GetByUserID(ctx context.Context, userID string) ([]domain.Order, error) {
-	start := time.Now()
-	query := `SELECT id, user_id, product_id, quantity, total_price, status, created_at, updated_at
-              FROM orders WHERE user_id = $1`
-	rows, err := r.pool.Query(ctx, query, userID)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
+func (r *PostgresOrderRepository) ListByUser(ctx context.Context, userID string, limit, offset int) ([]domain.Order, error) {
+	const q = `
+		SELECT id, user_id, items, status, total_amount,
+		       created_at, created_by, updated_at, updated_by
+		FROM   orders
+		WHERE  user_id = $1
+		ORDER  BY created_at DESC
+		LIMIT  $2 OFFSET $3`
 
+	rows, err := r.pool.Query(ctx, q, userID, limit, offset)
 	if err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom:       map[string]any{"method": "get_by_user_id"},
-		})
 		return nil, err
 	}
 	defer rows.Close()
@@ -134,152 +67,59 @@ func (r *PostgresOrderRepository) GetByUserID(ctx context.Context, userID string
 	var orders []domain.Order
 	for rows.Next() {
 		var o domain.Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.ProductID, &o.Quantity, &o.TotalPrice, &o.Status,
-			&o.CreatedAt, &o.UpdatedAt); err != nil {
-			duration = time.Since(start)
-			rowsAffected = int64(len(orders))
-			r.logger.LogDB(logger.DBLogParams{
-				Ctx:          ctx,
-				Operation:    logger.DBSelect,
-				Table:        "orders",
-				Duration:     duration,
-				RowsAffected: rowsAffected,
-				Err:          err,
-				Custom:       map[string]any{"method": "get_by_user_id"},
-			})
+		var itemsJSON []byte
+
+		if err := rows.Scan(
+			&o.ID, &o.UserID, &itemsJSON, &o.Status, &o.TotalAmount,
+			&o.Audit.CreatedAt, &o.Audit.CreatedBy,
+			&o.Audit.UpdatedAt, &o.Audit.UpdatedBy,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(itemsJSON, &o.Items); err != nil {
 			return nil, err
 		}
 		orders = append(orders, o)
 	}
-
-	duration = time.Since(start)
-	rowsAffected = int64(len(orders))
-
-	if err := rows.Err(); err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom:       map[string]any{"method": "get_by_user_id"},
-		})
-		return nil, err
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBSelect,
-		Table:        "orders",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          nil,
-		Custom:       map[string]any{"method": "get_by_user_id"},
-	})
-	return orders, nil
+	return orders, rows.Err()
 }
 
-// UpdateStatus changes the status of an order and updates updated_at.
-func (r *PostgresOrderRepository) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
-	start := time.Now()
-	now := time.Now().UTC()
-	query := `UPDATE orders SET status = $1, updated_at = $2 WHERE id = $3`
-	result, err := r.pool.Exec(ctx, query, status, now, id)
-
-	duration := time.Since(start)
-	rowsAffected := int64(0)
-	if err == nil {
-		rowsAffected = result.RowsAffected()
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBUpdate,
-		Table:        "orders",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          err,
-		Custom:       map[string]any{"method": "update_status", "new_status": status},
-	})
-
+// Create persists a new order inside the provided transaction.
+// It receives a pgx.Tx instead of using the pool directly because order
+// creation is always part of a larger transaction that also decrements stock.
+// The caller (service layer) owns the transaction lifecycle — begin, commit,
+// rollback. The repository never calls Begin() or Commit() itself.
+func (r *PostgresOrderRepository) Create(ctx context.Context, tx pgx.Tx, o *domain.Order) error {
+	itemsJSON, err := json.Marshal(o.Items)
 	if err != nil {
 		return err
 	}
-	if rowsAffected == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+
+	const q = `
+		INSERT INTO orders (id, user_id, items, status, total_amount, created_at, created_by, updated_at, updated_by)
+		VALUES ($1, $2, $3, $4, $5, NOW(), $6, NOW(), $6)
+		RETURNING created_at, updated_at`
+
+	return tx.QueryRow(ctx, q,
+		o.ID, o.UserID, itemsJSON, o.Status, o.TotalAmount, o.Audit.CreatedBy,
+	).Scan(&o.Audit.CreatedAt, &o.Audit.UpdatedAt)
 }
 
-// List returns all orders (admin use).
-func (r *PostgresOrderRepository) List(ctx context.Context) ([]domain.Order, error) {
-	start := time.Now()
-	query := `SELECT id, user_id, product_id, quantity, total_price, status, created_at, updated_at
-              FROM orders`
-	rows, err := r.pool.Query(ctx, query)
-	duration := time.Since(start)
-	rowsAffected := int64(0)
+func (r *PostgresOrderRepository) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
+	const q = `
+		UPDATE orders
+		SET    status     = $1,
+		       updated_at = NOW()
+		WHERE  id = $2
+		RETURNING updated_at`
 
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, q, status, id).Scan(&updatedAt)
 	if err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom:       map[string]any{"method": "list"},
-		})
-		return nil, err
-	}
-	defer rows.Close()
-
-	var orders []domain.Order
-	for rows.Next() {
-		var o domain.Order
-		if err := rows.Scan(&o.ID, &o.UserID, &o.ProductID, &o.Quantity, &o.TotalPrice, &o.Status,
-			&o.CreatedAt, &o.UpdatedAt); err != nil {
-			duration = time.Since(start)
-			rowsAffected = int64(len(orders))
-			r.logger.LogDB(logger.DBLogParams{
-				Ctx:          ctx,
-				Operation:    logger.DBSelect,
-				Table:        "orders",
-				Duration:     duration,
-				RowsAffected: rowsAffected,
-				Err:          err,
-				Custom:       map[string]any{"method": "list"},
-			})
-			return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
 		}
-		orders = append(orders, o)
+		return err
 	}
-
-	duration = time.Since(start)
-	rowsAffected = int64(len(orders))
-
-	if err := rows.Err(); err != nil {
-		r.logger.LogDB(logger.DBLogParams{
-			Ctx:          ctx,
-			Operation:    logger.DBSelect,
-			Table:        "orders",
-			Duration:     duration,
-			RowsAffected: rowsAffected,
-			Err:          err,
-			Custom:       map[string]any{"method": "list"},
-		})
-		return nil, err
-	}
-
-	r.logger.LogDB(logger.DBLogParams{
-		Ctx:          ctx,
-		Operation:    logger.DBSelect,
-		Table:        "orders",
-		Duration:     duration,
-		RowsAffected: rowsAffected,
-		Err:          nil,
-		Custom:       map[string]any{"method": "list"},
-	})
-	return orders, nil
+	return nil
 }
