@@ -49,8 +49,8 @@ func isIPTrusted(ip net.IP, trustedProxies []*net.IPNet) bool {
 	if ip.IsLoopback() {
 		return true
 	}
-	for _, net := range trustedProxies {
-		if net.Contains(ip) {
+	for _, cidr := range trustedProxies {
+		if cidr.Contains(ip) {
 			return true
 		}
 	}
