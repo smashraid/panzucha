@@ -1,13 +1,9 @@
 package messaging
 
-import (
-	"encoding/json"
-	"time"
+import "time"
 
-	"github.com/google/uuid"
-)
-
-// EventType constants for routing keys
+// Routing key constants used as RabbitMQ topic routing keys.
+// Consumers subscribe using patterns: "order.*" receives all order events.
 const (
 	EventOrderCreated = "order.created"
 	EventOrderPaid    = "order.paid"
@@ -15,91 +11,53 @@ const (
 	EventOrderShipped = "order.shipped"
 )
 
-// BaseEvent contains common fields for all events
+// BaseEvent carries fields every event must have.
+// EventID enables consumer-side deduplication.
+// Timestamp is always UTC.
 type BaseEvent struct {
 	EventID   string    `json:"event_id"`
 	EventType string    `json:"event_type"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// NewBaseEvent creates a new base event with generated ID and current timestamp
-func NewBaseEvent(eventType string) BaseEvent {
-	return BaseEvent{
-		EventID:   uuid.New().String(),
-		EventType: eventType,
-		Timestamp: time.Now().UTC(),
-	}
+// OrderItem is the event representation of a line item.
+// Defined here separately — messaging does not import domain.
+type OrderItem struct {
+	ProductID string  `json:"product_id"`
+	Quantity  int     `json:"quantity"`
+	UnitPrice float64 `json:"unit_price"`
 }
 
-// OrderCreatedEvent is published when an order is created (status = pending)
+// OrderCreatedEvent is published after a successful order commit.
+// Items contains the full line items — not a single ProductID — because
+// an order can contain multiple products.
 type OrderCreatedEvent struct {
 	BaseEvent
-	OrderID    string  `json:"order_id"`
-	UserID     string  `json:"user_id"`
-	ProductID  string  `json:"product_id"`
-	Quantity   int     `json:"quantity"`
-	TotalPrice float64 `json:"total_price"`
+	OrderID     string      `json:"order_id"`
+	UserID      string      `json:"user_id"`
+	Items       []OrderItem `json:"items"`
+	TotalAmount float64     `json:"total_amount"`
 }
 
-// NewOrderCreatedEvent creates an OrderCreatedEvent with populated base fields
-func NewOrderCreatedEvent(orderID, userID, productID string, quantity int, totalPrice float64) OrderCreatedEvent {
-	return OrderCreatedEvent{
-		BaseEvent:  NewBaseEvent(EventOrderCreated),
-		OrderID:    orderID,
-		UserID:     userID,
-		ProductID:  productID,
-		Quantity:   quantity,
-		TotalPrice: totalPrice,
-	}
-}
-
-// OrderPaidEvent is published after successful payment
+// OrderPaidEvent is published after payment confirmation.
 type OrderPaidEvent struct {
 	BaseEvent
 	OrderID   string    `json:"order_id"`
 	PaidAt    time.Time `json:"paid_at"`
-	PaymentID string    `json:"payment_id,omitempty"` // optional, for future integration
+	PaymentID string    `json:"payment_id,omitempty"`
 }
 
-// NewOrderPaidEvent creates an OrderPaidEvent
-func NewOrderPaidEvent(orderID string, paymentID string) OrderPaidEvent {
-	return OrderPaidEvent{
-		BaseEvent: NewBaseEvent(EventOrderPaid),
-		OrderID:   orderID,
-		PaidAt:    time.Now().UTC(),
-		PaymentID: paymentID,
-	}
-}
-
-// OrderFailedEvent is published when order processing fails (e.g., payment failure)
+// OrderFailedEvent is published when order processing fails.
 type OrderFailedEvent struct {
 	BaseEvent
 	OrderID string `json:"order_id"`
 	Reason  string `json:"reason"`
 }
 
-// NewOrderFailedEvent creates an OrderFailedEvent
-func NewOrderFailedEvent(orderID, reason string) OrderFailedEvent {
-	return OrderFailedEvent{
-		BaseEvent: NewBaseEvent(EventOrderFailed),
-		OrderID:   orderID,
-		Reason:    reason,
-	}
-}
-
-// OrderShippedEvent is published when order is shipped (future use)
+// OrderShippedEvent is published when an order ships.
 type OrderShippedEvent struct {
 	BaseEvent
 	OrderID   string    `json:"order_id"`
 	ShippedAt time.Time `json:"shipped_at"`
 	Tracking  string    `json:"tracking,omitempty"`
-}
-
-// Helper to JSON‑serialise any event
-func MarshalEvent(event interface{}) ([]byte, error) {
-	return json.Marshal(event)
-}
-
-func UnmarshalEvent(data []byte, event interface{}) error {
-	return json.Unmarshal(data, event)
 }
