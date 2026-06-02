@@ -31,8 +31,8 @@ func main() {
 	//log := logger.New(cfg)
 	// defer log.Close()
 
-	rabbitMQ := messaging.NewRabbitMQ(cfg.RabbitMQURL)
-	if err := rabbitMQ.Connect(); err != nil {
+	broker := messaging.NewRabbitMQBroker(cfg.RabbitMQURL, "amq.topic")
+	if err := broker.Connect(); err != nil {
 		slog.Error("failed to connect to RabbitMQ", "error", err)
 		os.Exit(1)
 	}
