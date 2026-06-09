@@ -1,0 +1,24 @@
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiZTg5ZWNiNDMtNTNmZC00MTgyLTlmYmMtZWNmNGU3YjNmNWUyIiwiZW1haWwiOiJzbWFzaHJhaWRAZ21haWwuY29tIiwicm9sZXMiOlsidXNlciJdLCJleHAiOjE3ODExMDY5OTIsImlhdCI6MTc4MTAyMDU5Mn0.8i9U-9RnpmU5Q1rzA6YetphIn0HI_881d5BPO2RreJw
+
+
+### Get all products
+# @name products
+# @description get all products from table products
+GET http://localhost:8080/api/v1/products
+User-Agent: resterm
+Accept: application/json 
+Authorization: Bearer {{token}}
+
+### Create a product
+# @name products
+# @description create a new product
+POST http://localhost:8080/api/v1/products
+Content-Type: application/json 
+Authorization: Bearer {{token}}
+
+{
+    "name":"Lenovo ThinkPad X1 Carbon 11ra Gen (14 inch Intel)",
+    "description": "Con certificación Intel® Evo™ con CPU Intel® Core™ vPro® de hasta 13ra generación",
+    "price": 1999.99,
+    "stock": 10
+}

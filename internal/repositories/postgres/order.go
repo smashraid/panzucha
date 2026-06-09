@@ -7,7 +7,9 @@ import (
 	"panzucha/internal/domain"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -90,19 +92,37 @@ func (r *PostgresOrderRepository) ListByUser(ctx context.Context, userID string,
 // The caller (service layer) owns the transaction lifecycle — begin, commit,
 // rollback. The repository never calls Begin() or Commit() itself.
 func (r *PostgresOrderRepository) Create(ctx context.Context, tx pgx.Tx, o *domain.Order) error {
-	itemsJSON, err := json.Marshal(o.Items)
-	if err != nil {
+	if err := createOrder(ctx, tx, o); err != nil {
 		return err
 	}
 
+	for i := range o.Items {
+		_, err := createOrderItem(ctx, tx, o.ID, o.Items[i])
+		return err
+	}
+
+	return nil
+}
+
+func createOrder(ctx context.Context, tx pgx.Tx, o *domain.Order) error {
 	const q = `
-		INSERT INTO orders (id, user_id, items, status, total_amount, created_at, created_by, updated_at, updated_by)
-		VALUES ($1, $2, $3, $4, $5, NOW(), $6, NOW(), $6)
-		RETURNING created_at, updated_at`
+        INSERT INTO orders (id, user_id, status, total_amount, created_at, created_by, updated_at, updated_by)
+        VALUES ($1, $2, $3, $4, NOW(), $5, NOW(), $5)
+        RETURNING created_at, updated_at`
 
 	return tx.QueryRow(ctx, q,
-		o.ID, o.UserID, itemsJSON, o.Status, o.TotalAmount, o.Audit.CreatedBy,
+		o.ID, o.UserID, o.Status, o.TotalAmount, o.Audit.CreatedBy,
 	).Scan(&o.Audit.CreatedAt, &o.Audit.UpdatedAt)
+}
+
+func createOrderItem(ctx context.Context, tx pgx.Tx, orderID string, oi domain.OrderItem) (pgconn.CommandTag, error) {
+	const q = `
+		INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`
+	itemID := uuid.NewString()
+	return tx.Exec(ctx, q,
+		itemID, orderID, oi.ProductID, oi.Quantity, oi.UnitPrice,
+	)
 }
 
 func (r *PostgresOrderRepository) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
