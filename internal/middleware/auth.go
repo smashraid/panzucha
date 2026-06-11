@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"panzucha/internal/auth"
+	"panzucha/internal/httputil"
 	"strings"
 )
 
@@ -10,24 +12,41 @@ func Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "missing authorization header", http.StatusUnauthorized)
+			slog.WarnContext(r.Context(), "auth: missing authorization header",
+				"path", r.URL.Path,
+			)
+			httputil.RespondJSON(w, http.StatusUnauthorized, httputil.APIError{
+				Code:    "UNAUTHORIZED",
+				Message: "missing authorization header",
+			})
 			return
 		}
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+			slog.WarnContext(r.Context(), "auth: malformed authorization header",
+				"path", r.URL.Path,
+			)
+			httputil.RespondJSON(w, http.StatusUnauthorized, httputil.APIError{
+				Code:    "UNAUTHORIZED",
+				Message: "invalid authorization header format",
+			})
 			return
 		}
 
-		tokenString := parts[1]
-		claims, err := auth.ValidateToken(tokenString)
+		claims, err := auth.ValidateToken(parts[1])
 		if err != nil {
-			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			slog.WarnContext(r.Context(), "auth: invalid token",
+				"path", r.URL.Path,
+				"method", r.Method,
+			)
+			httputil.RespondJSON(w, http.StatusUnauthorized, httputil.APIError{
+				Code:    "UNAUTHORIZED",
+				Message: "invalid or expired token",
+			})
 			return
 		}
 
-		// Store user info in context
 		ctx := auth.ContextWithUser(r.Context(), claims.UserID, claims.Roles)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
