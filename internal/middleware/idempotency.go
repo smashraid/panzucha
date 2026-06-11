@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+type contextKey string
+
 const (
 	idempotencyKeyCtxKey contextKey = "idempotency_key"
 )

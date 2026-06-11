@@ -11,6 +11,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
+	"panzucha/internal/auth"
 	"panzucha/internal/contextkeys"
 	"panzucha/internal/domain"
 	"panzucha/internal/httputil"
@@ -47,7 +48,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := contextkeys.GetUserID(r.Context())
+	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
 		slog.WarnContext(r.Context(), "create_order: missing auth context")
 		httputil.RespondError(w, domain.ErrUnauthorized)
