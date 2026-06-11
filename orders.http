@@ -1,0 +1,18 @@
+@token = 
+
+### Create a new order
+# @name orders
+# @description create a new order and send to the queue
+POST http://localhost:8080/api/v1/orders
+Content-Type: application/json 
+Authorization: Bearer {{token}}
+Idempotency-Key: b11ea294-dc48-44bc-9ea9-6773abd08283
+
+{
+    "items": [
+        {
+            "product_id": "f",
+            "quantity": 1
+        }
+    ]
+} 

@@ -46,7 +46,8 @@ CREATE INDEX idx_products_name ON products(name);
 CREATE TABLE orders (
     id           UUID PRIMARY KEY,
     user_id      UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    status       VARCHAR(20) NOT NULL DEFAULT 'pending',
+    status       VARCHAR(20) NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending','confirmed','shipped','cancelled')),
     total_amount DECIMAL(10,2) NOT NULL CHECK (total_amount >= 0),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by   TEXT,
@@ -87,7 +88,8 @@ CREATE TABLE idempotency_keys (
     resource_id     UUID,
     response_status INT,
     response_body   JSONB,
-    status          VARCHAR(20) NOT NULL DEFAULT 'processing',
+    status          TEXT        NOT NULL DEFAULT 'processing'
+                                CHECK (status IN ('processing','completed')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at      TIMESTAMPTZ NOT NULL
 );

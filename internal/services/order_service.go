@@ -29,6 +29,7 @@ type orderService struct {
 	orderRepo       domain.OrderRepository
 	productRepo     domain.ProductRepository
 	idempotencyRepo domain.IdempotencyKeyRepository
+	publisher       domain.EventPublisher
 }
 
 func NewOrderService(
@@ -36,12 +37,14 @@ func NewOrderService(
 	orderRepo domain.OrderRepository,
 	productRepo domain.ProductRepository,
 	idempotencyRepo domain.IdempotencyKeyRepository,
+	publisher domain.EventPublisher,
 ) OrderService {
 	return &orderService{
 		transactor:      transactor,
 		orderRepo:       orderRepo,
 		productRepo:     productRepo,
 		idempotencyRepo: idempotencyRepo,
+		publisher:       publisher,
 	}
 }
 
@@ -143,6 +146,18 @@ func (s *orderService) Create(ctx context.Context, input CreateOrderInput) (*dom
 		svcErr = err
 		return nil, svcErr
 	}
+
+	// ── Step 9: Publish event — after commit, outside the transaction ─────
+	//
+	// Publishing happens AFTER commit for two reasons:
+	//   1. If we published inside the tx and then the commit failed, consumers
+	//      would process an event for an order that doesn't exist in the DB.
+	//   2. The broker call doesn't need to be atomic with the DB write —
+	//      failure here is logged but doesn't roll back the order.
+	//
+	// The trade-off: if the process crashes between commit and publish, the
+	// event is lost. The production solution is the transactional outbox pattern.
+	s.publisher.OrderCreated(ctx, order)
 
 	return order, nil
 }

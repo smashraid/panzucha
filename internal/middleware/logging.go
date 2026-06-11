@@ -36,7 +36,7 @@ func StructuredLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 					slog.String("method", r.Method),
 					slog.String("path", path),
 					slog.String("client_ip", clientIP),
-					slog.String("user_agent", r.UserAgent()),
+					slog.String("user_agent", r.UserAgent()), // PII — anonymize in production if required
 					slog.Int("status", ww.Status()),
 					slog.Duration("latency", time.Since(start)),
 					slog.Int("bytes_written", ww.BytesWritten()),

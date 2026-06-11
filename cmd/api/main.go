@@ -6,15 +6,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
+	"time"
+
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
 	"panzucha/internal/messaging"
+	"panzucha/internal/publisher"
 	"panzucha/internal/repositories/postgres"
-
 	"panzucha/internal/server"
 	"panzucha/internal/services"
-	"syscall"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,14 +29,14 @@ func main() {
 	stdLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(stdLogger)
 
-	//log := logger.New(cfg)
-	// defer log.Close()
-
-	rabbitMQ := messaging.NewRabbitMQ(cfg.RabbitMQURL)
-	if err := rabbitMQ.Connect(); err != nil {
+	broker := messaging.NewRabbitMQBroker(cfg.RabbitMQURL, "order.events")
+	if err := broker.Connect(); err != nil {
 		slog.Error("failed to connect to RabbitMQ", "error", err)
 		os.Exit(1)
 	}
+	defer broker.Close()
+
+	pub := publisher.New(broker)
 
 	// 3. Database connection
 	ctx := context.Background()
@@ -61,12 +62,11 @@ func main() {
 	idempotencyRepo := postgres.NewPostgresIdempotencyKeyRepository(pool)
 
 	orderRepo := postgres.NewPostgresOrderRepository(pool)
-	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo)
+	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo, pub)
 	orderHandler := handlers.NewOrderHandler(orderService, validate)
 
 	// 5. Router (chi)
 	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
-
 	defer telemetryShutdown()
 
 	// 6. HTTP server
