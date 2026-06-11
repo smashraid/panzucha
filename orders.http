@@ -1,4 +1,4 @@
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiZTg5ZWNiNDMtNTNmZC00MTgyLTlmYmMtZWNmNGU3YjNmNWUyIiwiZW1haWwiOiJzbWFzaHJhaWRAZ21haWwuY29tIiwicm9sZXMiOlsidXNlciJdLCJleHAiOjE3ODExMTM0NjIsImlhdCI6MTc4MTAyNzA2Mn0.JK35UXmZypV6Vtr9tBrLFRUiupgog6VU6LvrIoj1Qio
+@token = 
 
 ### Create a new order
 # @name orders
@@ -11,7 +11,7 @@ Idempotency-Key: b11ea294-dc48-44bc-9ea9-6773abd08283
 {
     "items": [
         {
-            "product_id": "ffc4f823-a722-4f98-87e4-56e229826b4f",
+            "product_id": "f",
             "quantity": 1
         }
     ]
