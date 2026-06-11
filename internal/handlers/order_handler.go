@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	"panzucha/internal/auth"
-	"panzucha/internal/contextkeys"
 	"panzucha/internal/domain"
 	"panzucha/internal/httputil"
 	"panzucha/internal/middleware"
@@ -101,7 +100,7 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrderHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
-	userID, ok := contextkeys.GetUserID(r.Context())
+	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
 		slog.WarnContext(r.Context(), "list_orders: missing auth context")
 		httputil.RespondError(w, domain.ErrUnauthorized)

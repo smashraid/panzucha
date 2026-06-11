@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 
-	"panzucha/internal/contextkeys"
+	"panzucha/internal/auth"
 	"panzucha/internal/domain"
 	"panzucha/internal/httputil"
 	"panzucha/internal/services"
@@ -114,7 +114,7 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// updatedBy comes from the auth context — the caller's verified identity.
 	// Passing req.Email as updatedBy (as in the original) would mean "the email
 	// being updated" is recorded as who made the change, which is wrong.
-	callerID, ok := contextkeys.GetUserID(r.Context())
+	callerID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
 		slog.WarnContext(r.Context(), "update_user: missing auth context", "user_id", userID)
 		httputil.RespondError(w, domain.ErrUnauthorized)
@@ -138,7 +138,7 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 
-	callerID, ok := contextkeys.GetUserID(r.Context())
+	callerID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
 		slog.WarnContext(r.Context(), "delete_user: missing auth context", "user_id", userID)
 		httputil.RespondError(w, domain.ErrUnauthorized)
