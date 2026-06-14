@@ -12,7 +12,7 @@ services:
     volumes:
       - /home/smashraid/volumes/postgresql:/var/lib/postgresql
     networks:
-      - kind
+      - dev
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -27,33 +27,34 @@ services:
     volumes:
       - /home/smashraid/volumes/pgadmin:/var/lib/pgadmin
     networks:
-      - kind
+      - dev
 
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.1.3-management
     container_name: rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      #RABBITMQ_VM_MEMORY_HIGH_WATERMARK: "512MiB"
     ports:
       - "5672:5672"      # AMQP protocol (Go client)
       - "15672:15672"    # Management UI
     volumes:      
       - /home/smashraid/volumes/rabbitmq:/var/lib/rabbitmq
-      - /home/smashraid/volumes/rabbitmq/conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      #- /home/smashraid/volumes/rabbitmq/conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
       retries: 5
+      start_period: 45s
     networks:
-      - kind
+      - dev
 
 networks:
-  kind:
-    external: true
-    name: kind
+  dev:
+    name: local
   # bridge:
   #   external: true
   #   name: bridge
