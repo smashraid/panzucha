@@ -13,5 +13,5 @@ type Inbox struct {
 }
 
 type InboxRepository interface {
-	Create(ctx context.Context, tx pgx.Tx, inbox Inbox) error
+	Create(ctx context.Context, tx pgx.Tx, eventID string) error
 }

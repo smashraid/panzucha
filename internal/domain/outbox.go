@@ -17,6 +17,7 @@ type Outbox struct {
 }
 
 type OutboxRepository interface {
-	GetByID(ctx context.Context, id string) (*Outbox, error)
 	Create(ctx context.Context, tx pgx.Tx, outbox Outbox) error
+	List(ctx context.Context, limit int) ([]Outbox, error)
+	MarkPublished(ctx context.Context, id string) error
 }
