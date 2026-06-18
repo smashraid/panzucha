@@ -23,7 +23,7 @@ type Config struct {
 	Version string `env:"SERVICE_VERSION" envDefault:"1.0.0"`
 
 	// RabbitMQ configuration
-	RabbitMQURL      string `env:"RABBITMQ_URL" envDefault:"amqp://guest:guest@localhost:5672/"`
+	RabbitMQURL      string `env:"RABBITMQ_URL" envDefault:"amqp://admin:admin123@localhost:5672/"`
 	OrderExchange    string `env:"ORDER_EXCHANGE" envDefault:"order.events"`
 	OrderQueuePrefix string `env:"ORDER_QUEUE_PREFIX" envDefault:"order"`
 }

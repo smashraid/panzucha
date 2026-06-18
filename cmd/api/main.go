@@ -12,7 +12,6 @@ import (
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
 	"panzucha/internal/messaging"
-	"panzucha/internal/publisher"
 	"panzucha/internal/repositories/postgres"
 	"panzucha/internal/server"
 	"panzucha/internal/services"
@@ -36,7 +35,7 @@ func main() {
 	}
 	defer broker.Close()
 
-	pub := publisher.New(broker)
+	//pub := publisher.New(broker)
 
 	// 3. Database connection
 	ctx := context.Background()
@@ -60,9 +59,10 @@ func main() {
 	productHandler := handlers.NewProductHandler(productService, validate)
 
 	idempotencyRepo := postgres.NewPostgresIdempotencyKeyRepository(pool)
+	outboxRepo := postgres.NewPostgresOutboxRepository(pool)
 
 	orderRepo := postgres.NewPostgresOrderRepository(pool)
-	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo, pub)
+	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo, outboxRepo)
 	orderHandler := handlers.NewOrderHandler(orderService, validate)
 
 	// 5. Router (chi)

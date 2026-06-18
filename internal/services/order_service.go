@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"panzucha/internal/domain"
+	"panzucha/internal/messaging"
 	"panzucha/internal/repositories/postgres"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type CreateOrderInput struct {
@@ -29,7 +32,7 @@ type orderService struct {
 	orderRepo       domain.OrderRepository
 	productRepo     domain.ProductRepository
 	idempotencyRepo domain.IdempotencyKeyRepository
-	publisher       domain.EventPublisher
+	outboxRepo      domain.OutboxRepository
 }
 
 func NewOrderService(
@@ -37,14 +40,14 @@ func NewOrderService(
 	orderRepo domain.OrderRepository,
 	productRepo domain.ProductRepository,
 	idempotencyRepo domain.IdempotencyKeyRepository,
-	publisher domain.EventPublisher,
+	outboxRepo domain.OutboxRepository,
 ) OrderService {
 	return &orderService{
 		transactor:      transactor,
 		orderRepo:       orderRepo,
 		productRepo:     productRepo,
 		idempotencyRepo: idempotencyRepo,
-		publisher:       publisher,
+		outboxRepo:      outboxRepo,
 	}
 }
 
@@ -141,23 +144,19 @@ func (s *orderService) Create(ctx context.Context, input CreateOrderInput) (*dom
 		return nil, svcErr
 	}
 
+	outbox := domain.Outbox{
+		ID:        uuid.NewString(),
+		EventID:   uuid.NewString(),
+		EventType: messaging.EventOrderCreated,
+		Payload:   responseBody,
+	}
+	s.outboxRepo.Create(ctx, tx, outbox)
+
 	// ── Step 8: Commit ────────────────────────────────────────────────────
 	if err := tx.Commit(ctx); err != nil {
 		svcErr = err
 		return nil, svcErr
 	}
-
-	// ── Step 9: Publish event — after commit, outside the transaction ─────
-	//
-	// Publishing happens AFTER commit for two reasons:
-	//   1. If we published inside the tx and then the commit failed, consumers
-	//      would process an event for an order that doesn't exist in the DB.
-	//   2. The broker call doesn't need to be atomic with the DB write —
-	//      failure here is logged but doesn't roll back the order.
-	//
-	// The trade-off: if the process crashes between commit and publish, the
-	// event is lost. The production solution is the transactional outbox pattern.
-	s.publisher.OrderCreated(ctx, order)
 
 	return order, nil
 }
