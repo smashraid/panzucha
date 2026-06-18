@@ -12,6 +12,7 @@ import (
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
 	"panzucha/internal/messaging"
+	"panzucha/internal/outbox"
 	"panzucha/internal/repositories/postgres"
 	"panzucha/internal/server"
 	"panzucha/internal/services"
@@ -64,6 +65,10 @@ func main() {
 	orderRepo := postgres.NewPostgresOrderRepository(pool)
 	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo, outboxRepo)
 	orderHandler := handlers.NewOrderHandler(orderService, validate)
+
+	outboxCfg := outbox.Config{}
+	outboxRelay := outbox.NewRelay(outboxRepo, broker, pool, outboxCfg)
+	go outboxRelay.Start(ctx)
 
 	// 5. Router (chi)
 	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)

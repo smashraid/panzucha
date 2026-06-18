@@ -7,6 +7,8 @@ import (
 
 	"panzucha/internal/domain"
 	"panzucha/internal/messaging"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Config controls relay behaviour. Sensible defaults are applied by NewRelay
@@ -48,15 +50,17 @@ func (c *Config) withDefaults() Config {
 type Relay struct {
 	outboxRepo domain.OutboxRepository
 	broker     messaging.Broker
+	pool       *pgxpool.Pool
 	cfg        Config
 }
 
 // NewRelay creates a Relay. Start() must be called explicitly — typically
 // as a goroutine in main.go after the broker connection is established.
-func NewRelay(repo domain.OutboxRepository, broker messaging.Broker, cfg Config) *Relay {
+func NewRelay(repo domain.OutboxRepository, broker messaging.Broker, pool *pgxpool.Pool, cfg Config) *Relay {
 	return &Relay{
 		outboxRepo: repo,
 		broker:     broker,
+		pool:       pool,
 		cfg:        cfg.withDefaults(),
 	}
 }
@@ -100,52 +104,43 @@ func (r *Relay) Start(ctx context.Context) {
 // Errors inside the cycle are logged but never returned — the relay
 // must keep running even if a single cycle fails.
 func (r *Relay) runCycle(ctx context.Context) {
-	rows, err := r.outboxRepo.List(ctx, r.cfg.BatchSize)
+	// Fetch a batch to know how many rows are pending —
+	// then process each in its own tx to minimise lock duration.
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		slog.ErrorContext(ctx, "outbox relay: failed to fetch rows", "err", err)
+		slog.ErrorContext(ctx, "outbox relay: begin tx failed", "err", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := r.outboxRepo.ListAndLock(ctx, tx, r.cfg.BatchSize)
+	if err != nil {
+		slog.ErrorContext(ctx, "outbox relay: list failed", "err", err)
 		return
 	}
 	if len(rows) == 0 {
-		return // nothing pending — common case, no log noise
+		tx.Rollback(ctx)
+		return
 	}
-
-	slog.InfoContext(ctx, "outbox relay: processing batch", "count", len(rows))
 
 	for _, row := range rows {
-		r.publishRow(ctx, row)
-	}
-}
-
-// publishRow publishes one outbox row and marks it published on success.
-// Failures are logged individually so one bad row doesn't abort the batch.
-func (r *Relay) publishRow(ctx context.Context, row domain.Outbox) {
-	if err := r.broker.Publish(ctx, row.EventType, row.Payload); err != nil {
-		// Publish failed — leave published_at as NULL so the next cycle retries.
-		// Common causes: broker temporarily unavailable, network blip.
-		// The reconnect goroutine in RabbitMQBroker handles connection recovery.
-		slog.ErrorContext(ctx, "outbox relay: publish failed",
-			"err", err,
-			"outbox_id", row.ID,
-			"event_type", row.EventType,
-			"event_id", row.EventID,
-		)
-		return
+		if err := r.broker.Publish(ctx, row.EventType, row.Payload); err != nil {
+			slog.ErrorContext(ctx, "outbox relay: publish failed",
+				"err", err, "outbox_id", row.ID, "event_type", row.EventType)
+			// Do not mark published — leave for next cycle.
+			// Roll back the whole batch so no row is partially marked.
+			tx.Rollback(ctx)
+			return
+		}
+		if err := r.outboxRepo.MarkPublished(ctx, tx, row.ID); err != nil {
+			slog.ErrorContext(ctx, "outbox relay: mark published failed",
+				"err", err, "outbox_id", row.ID)
+			tx.Rollback(ctx)
+			return
+		}
 	}
 
-	// Mark published only after the broker confirms delivery.
-	// If this update fails the row will be republished on the next cycle —
-	// consumers handle duplicates via the inbox dedup pattern.
-	if err := r.outboxRepo.MarkPublished(ctx, row.ID); err != nil {
-		slog.ErrorContext(ctx, "outbox relay: failed to mark published",
-			"err", err,
-			"outbox_id", row.ID,
-		)
-		return
+	if err := tx.Commit(ctx); err != nil {
+		slog.ErrorContext(ctx, "outbox relay: commit failed", "err", err)
 	}
-
-	slog.InfoContext(ctx, "outbox relay: published",
-		"outbox_id", row.ID,
-		"event_type", row.EventType,
-		"event_id", row.EventID,
-	)
 }
