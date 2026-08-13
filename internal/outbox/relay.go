@@ -56,13 +56,21 @@ type Relay struct {
 
 // NewRelay creates a Relay. Start() must be called explicitly — typically
 // as a goroutine in main.go after the broker connection is established.
-func NewRelay(repo domain.OutboxRepository, broker messaging.Broker, pool *pgxpool.Pool, cfg Config) *Relay {
-	return &Relay{
-		outboxRepo: repo,
-		broker:     broker,
-		pool:       pool,
-		cfg:        cfg.withDefaults(),
-	}
+func NewRelay(pool *pgxpool.Pool, repo domain.OutboxRepository, broker messaging.Broker, cfg Config) *Relay {
+    defaults := defaultConfig()
+    if cfg.Interval <= 0 {
+        cfg.Interval = defaults.Interval
+    }
+    if cfg.BatchSize <= 0 {
+        cfg.BatchSize = defaults.BatchSize
+    }
+    if cfg.Concurrency <= 0 {
+        cfg.Concurrency = defaults.Concurrency
+    }
+    if cfg.MaxRetries <= 0 {
+        cfg.MaxRetries = defaults.MaxRetries
+    }
+    return &Relay{pool: pool, outboxRepo: repo, broker: broker, cfg: cfg}
 }
 
 // Start runs the relay loop until ctx is cancelled.
