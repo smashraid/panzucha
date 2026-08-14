@@ -13,21 +13,28 @@ type Outbox struct {
 	EventType   string
 	Payload     []byte
 	PublishedAt *time.Time
+	RetryCount  int
+	LastError   *string
 	CreatedAt   time.Time
 }
 
 type OutboxRepository interface {
-	// Create writes an outbox row inside the caller's transaction.
-	// Atomic with the business operation that produced the event.
 	Create(ctx context.Context, tx pgx.Tx, o Outbox) error
 
-	// ListAndLock fetches up to limit unpublished rows inside the provided
-	// transaction using FOR UPDATE SKIP LOCKED. The lock is held until the
-	// transaction commits or rolls back — preventing concurrent relay
-	// instances from picking the same rows.
-	ListAndLock(ctx context.Context, tx pgx.Tx, limit int) ([]Outbox, error)
+	// ListAndLock fetches up to limit unpublished, retryable rows inside tx,
+	// locking ALL of them with FOR UPDATE SKIP LOCKED in a single round-trip.
+	// The lock is held until the caller commits or rolls back the tx — so the
+	// caller must publish and call MarkPublished/MarkFailed BEFORE committing.
+	ListAndLock(ctx context.Context, tx pgx.Tx, limit, maxRetries int) ([]Outbox, error)
 
-	// MarkPublished sets published_at = NOW() inside the same transaction
-	// that locked the row, ensuring the lock covers the full publish cycle.
-	MarkPublished(ctx context.Context, tx pgx.Tx, id string) error
+	// MarkPublishedBatch sets published_at = NOW() for all given IDs in one
+	// statement using = ANY($1) — one round-trip regardless of batch size.
+	MarkPublishedBatch(ctx context.Context, tx pgx.Tx, ids []string) error
+
+	// MarkFailedBatch increments retry_count and sets last_error for all
+	// given IDs in one statement. errMsg is shared because batch publish
+	// failures are usually the same root cause (broker down, etc.); if you
+	// need per-row error messages, fall back to individual MarkFailed calls
+	// for that subset.
+	MarkFailedBatch(ctx context.Context, tx pgx.Tx, ids []string, errMsg string) error
 }

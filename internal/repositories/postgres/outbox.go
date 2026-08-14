@@ -19,8 +19,6 @@ func NewPostgresOutboxRepository(pool *pgxpool.Pool) *PostgresOutboxRepository {
 	return &PostgresOutboxRepository{pool: pool}
 }
 
-// Create inserts an outbox row inside the caller's transaction.
-// published_at is excluded — stays NULL until the relay marks it.
 func (r *PostgresOutboxRepository) Create(ctx context.Context, tx pgx.Tx, o domain.Outbox) error {
 	const q = `
 		INSERT INTO outbox (id, event_id, event_type, payload, created_at)
@@ -32,20 +30,25 @@ func (r *PostgresOutboxRepository) Create(ctx context.Context, tx pgx.Tx, o doma
 	).Scan(&o.CreatedAt)
 }
 
-// ListAndLock fetches up to limit unpublished rows inside tx.
-// FOR UPDATE: holds a row-level lock until tx commits/rolls back.
-// SKIP LOCKED: concurrent relay instances skip locked rows rather than
-// waiting — each instance works on a disjoint set of rows.
-func (r *PostgresOutboxRepository) ListAndLock(ctx context.Context, tx pgx.Tx, limit int) ([]domain.Outbox, error) {
+// ListAndLock fetches and locks up to limit rows in ONE round-trip.
+// FOR UPDATE SKIP LOCKED still applies to the whole result set — every row
+// returned is locked; rows already locked by a concurrent relay instance
+// are transparently skipped, never returned, never double-processed.
+//
+// The lock on every returned row is held until the caller commits or rolls
+// back the transaction — which is why the caller must publish and call
+// MarkPublishedBatch/MarkFailedBatch BEFORE calling tx.Commit.
+func (r *PostgresOutboxRepository) ListAndLock(ctx context.Context, tx pgx.Tx, limit, maxRetries int) ([]domain.Outbox, error) {
 	const q = `
-		SELECT id, event_id, event_type, payload, created_at
+		SELECT id, event_id, event_type, payload, retry_count, last_error, created_at
 		FROM   outbox
 		WHERE  published_at IS NULL
+		AND    retry_count < $1
 		ORDER  BY created_at
-		LIMIT  $1
+		LIMIT  $2
 		FOR UPDATE SKIP LOCKED`
 
-	rows, err := tx.Query(ctx, q, limit)
+	rows, err := tx.Query(ctx, q, maxRetries, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,8 @@ func (r *PostgresOutboxRepository) ListAndLock(ctx context.Context, tx pgx.Tx, l
 	for rows.Next() {
 		var o domain.Outbox
 		if err := rows.Scan(
-			&o.ID, &o.EventID, &o.EventType, &o.Payload, &o.CreatedAt,
+			&o.ID, &o.EventID, &o.EventType, &o.Payload,
+			&o.RetryCount, &o.LastError, &o.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -64,10 +68,28 @@ func (r *PostgresOutboxRepository) ListAndLock(ctx context.Context, tx pgx.Tx, l
 	return result, rows.Err()
 }
 
-// MarkPublished sets published_at inside the same tx that locked the row.
-// The lock is released when the caller commits — after broker delivery is confirmed.
-func (r *PostgresOutboxRepository) MarkPublished(ctx context.Context, tx pgx.Tx, id string) error {
-	const q = `UPDATE outbox SET published_at = NOW() WHERE id = $1`
-	_, err := tx.Exec(ctx, q, id)
+// MarkPublishedBatch updates every row in ids with a single UPDATE ... = ANY($1).
+// One round-trip regardless of how many rows succeeded.
+func (r *PostgresOutboxRepository) MarkPublishedBatch(ctx context.Context, tx pgx.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	const q = `UPDATE outbox SET published_at = NOW() WHERE id = ANY($1)`
+	_, err := tx.Exec(ctx, q, ids)
+	return err
+}
+
+// MarkFailedBatch increments retry_count and sets a shared error message
+// for every row in ids in a single round-trip.
+func (r *PostgresOutboxRepository) MarkFailedBatch(ctx context.Context, tx pgx.Tx, ids []string, errMsg string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	const q = `
+		UPDATE outbox
+		SET    retry_count = retry_count + 1,
+		       last_error  = $1
+		WHERE  id = ANY($2)`
+	_, err := tx.Exec(ctx, q, errMsg, ids)
 	return err
 }

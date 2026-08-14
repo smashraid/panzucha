@@ -67,7 +67,7 @@ func main() {
 	orderHandler := handlers.NewOrderHandler(orderService, validate)
 
 	outboxCfg := outbox.Config{}
-	outboxRelay := outbox.NewRelay(outboxRepo, broker, pool, outboxCfg)
+	outboxRelay := outbox.NewRelay(pool, outboxRepo, broker, outboxCfg)
 	go outboxRelay.Start(ctx)
 
 	// 5. Router (chi)
