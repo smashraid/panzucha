@@ -6,16 +6,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"panzucha/internal/config"
-	"panzucha/internal/handlers"
-	"panzucha/internal/logger"
-	repositories "panzucha/internal/repositories/postgres"
-
-	"panzucha/internal/server"
-	"panzucha/internal/services"
 	"syscall"
 	"time"
 
+	"panzucha/internal/config"
+	"panzucha/internal/handlers"
+	"panzucha/internal/messaging"
+	"panzucha/internal/outbox"
+	"panzucha/internal/repositories/postgres"
+	"panzucha/internal/server"
+	"panzucha/internal/services"
+
+	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,8 +29,14 @@ func main() {
 	stdLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(stdLogger)
 
-	log := logger.New(cfg)
-	// defer log.Close()
+	broker := messaging.NewRabbitMQBroker(cfg.RabbitMQURL, "order.events")
+	if err := broker.Connect(); err != nil {
+		slog.Error("failed to connect to RabbitMQ", "error", err)
+		os.Exit(1)
+	}
+	defer broker.Close()
+
+	//pub := publisher.New(broker)
 
 	// 3. Database connection
 	ctx := context.Background()
@@ -39,25 +47,31 @@ func main() {
 	}
 	defer pool.Close()
 
+	validate := validator.New()
+	transactor := postgres.NewPgxTransactor(pool)
+
 	// 4. Repository -> Service -> Handler
-	userRepo := repositories.NewPostgresUserRepository(pool, log)
-	userService := services.NewUserService(userRepo, log)
-	userHandler := handlers.NewUserHandler(userService, log)
+	userRepo := postgres.NewPostgresUserRepository(pool)
+	userService := services.NewUserService(userRepo)
+	userHandler := handlers.NewUserHandler(userService, validate)
 
-	productRepo := repositories.NewPostgresProductRepository(pool, log)
-	productService := services.NewProductService(productRepo, log)
-	productHandler := handlers.NewProductHandler(productService, log)
+	productRepo := postgres.NewPostgresProductRepository(pool)
+	productService := services.NewProductService(productRepo)
+	productHandler := handlers.NewProductHandler(productService, validate)
 
-	idempotencyRepo := repositories.NewPostgresIdempotencyKeyRepository(pool, log)
-	idempotencyService := services.NewIdempotencyService(idempotencyRepo)
+	idempotencyRepo := postgres.NewPostgresIdempotencyKeyRepository(pool)
+	outboxRepo := postgres.NewPostgresOutboxRepository(pool)
 
-	orderRepo := repositories.NewPostgresOrderRepository(pool, log)
-	orderService := services.NewOrderService(orderRepo, log)
-	orderHandler := handlers.NewOrderHandler(orderService, productService, userService, idempotencyService, log)
+	orderRepo := postgres.NewPostgresOrderRepository(pool)
+	orderService := services.NewOrderService(transactor, orderRepo, productRepo, idempotencyRepo, outboxRepo)
+	orderHandler := handlers.NewOrderHandler(orderService, validate)
+
+	outboxCfg := outbox.Config{}
+	outboxRelay := outbox.NewRelay(pool, outboxRepo, broker, outboxCfg)
+	go outboxRelay.Start(ctx)
 
 	// 5. Router (chi)
 	r, telemetryShutdown := server.NewRouter(cfg, productHandler, userHandler, orderHandler)
-
 	defer telemetryShutdown()
 
 	// 6. HTTP server

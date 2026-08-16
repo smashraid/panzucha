@@ -2,8 +2,9 @@ package server
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net"
+	"os"
 	"panzucha/internal/config"
 	"panzucha/internal/handlers"
 	mymiddleware "panzucha/internal/middleware"
@@ -23,7 +24,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-	"go.uber.org/zap"
 )
 
 func NewRouter(
@@ -43,7 +43,8 @@ func NewRouter(
 		),
 	)
 	if err != nil {
-		log.Fatal("failed to create resource", zap.Error(err))
+		slog.Error("failed to create resource", "err", err)
+		os.Exit(1)
 	}
 
 	// --- 2. Setup OTLP Trace Exporter (to Jaeger / Collector) ---
@@ -52,7 +53,8 @@ func NewRouter(
 		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
 	)
 	if err != nil {
-		log.Fatal("failed to create trace exporter", zap.Error(err))
+		slog.Error("failed to create trace exporter", "err", err)
+		os.Exit(1)
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExporter),
@@ -63,7 +65,8 @@ func NewRouter(
 	// --- 3. Setup Prometheus Metric Exporter ---
 	metricExporter, err := prometheus.New()
 	if err != nil {
-		log.Fatal("failed to create metric exporter", zap.Error(err))
+		slog.Error("failed to create metric exporter", "err", err)
+		os.Exit(1)
 	}
 	mp := metric.NewMeterProvider(
 		metric.WithReader(metricExporter),
@@ -72,6 +75,8 @@ func NewRouter(
 	otel.SetMeterProvider(mp)
 
 	shutdown := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 		_ = tp.Shutdown(ctx)
 		_ = mp.Shutdown(ctx)
 	}
@@ -90,23 +95,21 @@ func NewRouter(
 	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
 	trustedProxies = append(trustedProxies, loopback)
 
-	// Security & Request Identification
+	r.Use(middleware.Recoverer)
 	r.Use(mymiddleware.ClientIP(trustedProxies))
-	r.Use(mymiddleware.RequestID)
+	r.Use(middleware.RequestID)
 
 	// OpenTelemetry tracing & metrics (automatically records HTTP metrics)
 	r.Use(otelhttp.NewMiddleware("panzucha-api"))
-
-	// Standard Recovery and Timeout
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
 
 	// Logging & metrics
 	if cfg.Environment == "development" {
 		r.Use(middleware.Logger)
 	} else {
-		r.Use(mymiddleware.LoggingMiddleware)
+		r.Use(mymiddleware.StructuredLogger(slog.Default()))
 	}
+
+	r.Use(middleware.Timeout(60 * time.Second))
 
 	// Expose Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())

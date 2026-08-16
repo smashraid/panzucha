@@ -2,391 +2,135 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
-	"time"
-
-	"panzucha/internal/handlers/dto"
-	"panzucha/internal/handlers/mapper"
-	"panzucha/internal/httputil"
-	"panzucha/internal/logger"
-	"panzucha/internal/services"
-	"panzucha/internal/validation"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
+
+	"panzucha/internal/domain"
+	"panzucha/internal/httputil"
+	"panzucha/internal/services"
 )
 
 type ProductHandler struct {
-	services services.ProductService
-	logger   *logger.Logger
+	svc      services.ProductService
+	validate *validator.Validate
 }
 
-func NewProductHandler(s services.ProductService, log *logger.Logger) *ProductHandler {
-	return &ProductHandler{services: s, logger: log}
+func NewProductHandler(s services.ProductService, v *validator.Validate) *ProductHandler {
+	return &ProductHandler{svc: s, validate: v}
 }
 
-// Create handles POST /products
-func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-
-	var req dto.CreateProductRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
-		return
-	}
-
-	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	product := mapper.FromCreateProductRequest(&req)
-	if err := h.services.Create(r.Context(), product); err != nil {
-		status := http.StatusInternalServerError
-		msg := logger.MsgBusinessInternalError
-		// Could inspect error type (e.g., conflict, bad request) but keep simple for now
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    req,
-		})
-		http.Error(w, msg, status)
-		return
-	}
-
-	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusCreated,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessCreated,
-		Payload:    req,
-	})
-	httputil.RespondJSON(w, http.StatusCreated, resp)
-}
-
-// GetByID handles GET /products/{id}
 func (h *ProductHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
 	id := chi.URLParam(r, "id")
-	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
-		return
-	}
 
-	product, err := h.services.GetByID(r.Context(), id)
+	product, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
-		status := http.StatusNotFound
-		if err.Error() != "product not found" {
-			status = http.StatusInternalServerError
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "get_product: failed", "err", err, "product_id", id)
 		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    err.Error(),
-			Payload:    nil,
-		})
-		http.Error(w, err.Error(), status)
+		httputil.RespondError(w, err)
 		return
 	}
 
-	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessRetrieved,
-		Payload:    nil,
-	})
-	httputil.RespondJSON(w, http.StatusOK, resp)
+	httputil.RespondJSON(w, http.StatusOK, toProductResponse(*product))
 }
 
-// Update handles PUT /products/{id}
-func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
-		return
-	}
-
-	var req dto.UpdateProductRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessInvalidJSON,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidJSON, http.StatusBadRequest)
-		return
-	}
-
-	if err := validation.Validate.Struct(req); err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessValidationFailed,
-			Payload:    req,
-		})
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	product := mapper.FromUpdateProductRequest(&req)
-	product.ID = id
-	if err := h.services.Update(r.Context(), product); err != nil {
-		status := http.StatusInternalServerError
-		msg := logger.MsgBusinessInternalError
-		if err.Error() == "product not found" {
-			status = http.StatusNotFound
-			msg = logger.MsgBusinessNotFound
-		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    req,
-		})
-		http.Error(w, msg, status)
-		return
-	}
-
-	resp := mapper.FromDomainToResponse(product)
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessUpdated,
-		Payload:    req,
-	})
-	httputil.RespondJSON(w, http.StatusOK, resp)
-}
-
-// Delete handles DELETE /products/{id}
-func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusBadRequest,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        nil,
-			Message:    logger.MsgBusinessInvalidIdentifier,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInvalidIdentifier, http.StatusBadRequest)
-		return
-	}
-
-	if err := h.services.Delete(r.Context(), id); err != nil {
-		status := http.StatusInternalServerError
-		msg := logger.MsgBusinessInternalError
-		if err.Error() == "product not found" {
-			status = http.StatusNotFound
-			msg = logger.MsgBusinessNotFound
-		}
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: status,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    msg,
-			Payload:    nil,
-		})
-		http.Error(w, msg, status)
-		return
-	}
-
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusNoContent,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessDeleted,
-		Payload:    nil,
-	})
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// List handles GET /products
 func (h *ProductHandler) List(w http.ResponseWriter, r *http.Request) {
-	info := ExtractRequestInfo(r)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
 
-	products, err := h.services.List(r.Context())
+	products, err := h.svc.List(r.Context(), limit, offset)
 	if err != nil {
-		h.logger.LogAPI(logger.APILogParams{
-			Ctx:        r.Context(),
-			Method:     r.Method,
-			Path:       r.URL.Path,
-			StatusCode: http.StatusInternalServerError,
-			Duration:   time.Since(info.StartTime),
-			RequestID:  info.RequestID,
-			UserID:     info.UserID,
-			ClientIP:   info.ClientIP,
-			UserAgent:  info.UserAgent,
-			Err:        err,
-			Message:    logger.MsgBusinessListFailed,
-			Payload:    nil,
-		})
-		http.Error(w, logger.MsgBusinessInternalError, http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "list_products: failed", "err", err, "limit", limit, "offset", offset)
+		httputil.RespondError(w, err)
 		return
 	}
 
-	resp := make([]dto.ProductResponse, len(products))
-	for i, p := range products {
-		resp[i] = *mapper.FromDomainToResponse(&p)
+	httputil.RespondJSON(w, http.StatusOK, toProductListResponse(products, limit, offset))
+}
+
+func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var req createProductRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.WarnContext(r.Context(), "create_product: invalid json", "err", err)
+		httputil.RespondError(w, domain.ErrInvalidInput)
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		slog.WarnContext(r.Context(), "create_product: validation failed", "err", err)
+		httputil.RespondError(w, err)
+		return
 	}
 
-	h.logger.LogAPI(logger.APILogParams{
-		Ctx:        r.Context(),
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		StatusCode: http.StatusOK,
-		Duration:   time.Since(info.StartTime),
-		RequestID:  info.RequestID,
-		UserID:     info.UserID,
-		ClientIP:   info.ClientIP,
-		UserAgent:  info.UserAgent,
-		Err:        nil,
-		Message:    logger.MsgBusinessListed,
-		Payload:    nil,
-	})
-	httputil.RespondJSON(w, http.StatusOK, resp)
+	p := toDomainProduct(req)
+	p.ID = uuid.NewString()
+
+	if err := h.svc.Create(r.Context(), &p); err != nil {
+		// Log safe fields only — never log the full payload which may contain
+		// sensitive pricing or inventory data not meant for log storage.
+		slog.ErrorContext(r.Context(), "create_product: failed", "err", err, "product_name", req.Name)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	slog.InfoContext(r.Context(), "create_product: success", "product_id", p.ID)
+	httputil.RespondJSON(w, http.StatusCreated, toProductResponse(p))
+}
+
+func (h *ProductHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req updateProductRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.WarnContext(r.Context(), "update_product: invalid json", "err", err, "product_id", id)
+		httputil.RespondError(w, domain.ErrInvalidInput)
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		slog.WarnContext(r.Context(), "update_product: validation failed", "err", err, "product_id", id)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	existing, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "update_product: fetch failed", "err", err, "product_id", id)
+		}
+		httputil.RespondError(w, err)
+		return
+	}
+
+	updated := applyProductUpdate(*existing, req)
+	if err := h.svc.Update(r.Context(), &updated); err != nil {
+		slog.ErrorContext(r.Context(), "update_product: failed", "err", err, "product_id", id)
+		httputil.RespondError(w, err)
+		return
+	}
+
+	slog.InfoContext(r.Context(), "update_product: success", "product_id", id)
+	httputil.RespondJSON(w, http.StatusOK, toProductResponse(updated))
+}
+
+func (h *ProductHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	if err := h.svc.Delete(r.Context(), id); err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			slog.ErrorContext(r.Context(), "delete_product: failed", "err", err, "product_id", id)
+		}
+		httputil.RespondError(w, err)
+		return
+	}
+
+	slog.InfoContext(r.Context(), "delete_product: success", "product_id", id)
+	w.WriteHeader(http.StatusNoContent)
 }
