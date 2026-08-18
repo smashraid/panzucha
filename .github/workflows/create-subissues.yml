@@ -14,73 +14,118 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Parse table and create sub-issues (GraphQL with parent)
+      - name: Parse table and create detailed sub-issues
         uses: actions/github-script@v7
         with:
           script: |
             const epicIssue = context.payload.issue;
             const body = epicIssue.body;
-            console.log("Issue body length:", body.length);
-            
-            // Get repository ID and epic node ID
-            const repoInfo = await github.rest.repos.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            });
-            const repositoryId = repoInfo.data.node_id;
+            const repositoryId = context.payload.repository.node_id;
             const parentIssueId = epicIssue.node_id;
-            
-            // Extract rows
-            const rowRegex = /\|\s*([\d\.]+)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|/g;
+
+            const rowRegex = /\|\s*\*{0,2}([\w.]+)\*{0,2}\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|/g;
+
             let rows = [];
             let match;
             while ((match = rowRegex.exec(body)) !== null) {
+              const taskId = match[1].trim();
+              if (taskId === 'Task' || /^:?-+:?$/.test(taskId)) {
+                continue;
+              }
               rows.push(match);
             }
-            console.log(`Found ${rows.length} rows.`);
-            if (rows.length === 0) return;
-            
+            console.log(`Found ${rows.length} valid task rows.`);
+
+            const existingTitlesQuery = [
+              'query($id: ID!) {',
+              '  node(id: $id) {',
+              '    ... on Issue {',
+              '      subIssues(first: 100) {',
+              '        nodes { title }',
+              '      }',
+              '    }',
+              '  }',
+              '}'
+            ].join('\n');
+
+            let existingTitles = new Set();
+            try {
+              const existing = await github.graphql(existingTitlesQuery, { id: parentIssueId });
+              existingTitles = new Set(existing.node.subIssues.nodes.map(n => n.title));
+            } catch (err) {
+              console.error('Failed to fetch existing sub-issues, proceeding without dedup:', err);
+            }
+
+            const mutation = [
+              'mutation($repositoryId: ID!, $title: String!, $body: String!, $parentIssueId: ID!) {',
+              '  createIssue(input: {',
+              '    repositoryId: $repositoryId,',
+              '    title: $title,',
+              '    body: $body,',
+              '    parentIssueId: $parentIssueId',
+              '  }) {',
+              '    issue {',
+              '      number',
+              '      url',
+              '    }',
+              '  }',
+              '}'
+            ].join('\n');
+
             for (const row of rows) {
-              const ticket = row[1].trim();
+              const taskId = row[1].trim();
               const description = row[2].trim();
-              const deliverables = row[3].trim();
-              console.log(`Creating sub‑issue: ${ticket} - ${description.substring(0, 50)}...`);
-              
-              const mutation = `
-                mutation CreateSubIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $assigneeIds: [ID!], $parentIssueId: ID!) {
-                  createIssue(input: {
-                    repositoryId: $repositoryId,
-                    title: $title,
-                    body: $body,
-                    labelIds: $labelIds,
-                    assigneeIds: $assigneeIds,
-                    parentIssueId: $parentIssueId
-                  }) {
-                    issue {
-                      id
-                      number
-                    }
-                  }
-                }
-              `;
-              
-              // Get label ID for 'type:task' (you need to fetch label ID; or omit labels for simplicity)
-              // We'll fetch label IDs once outside the loop
-              // For simplicity, we'll skip labels in this example; you can add them later.
-              
+              const affectedAreas = row[3].trim();
+              const deliverables = row[4].trim().replace(/<br\s*\/?>/gi, '\n');
+
+              const issueTitle = `[${taskId}] ${description}`;
+
+              if (existingTitles.has(issueTitle)) {
+                console.log(`Skipping ${taskId} - sub-issue already exists.`);
+                continue;
+              }
+
+              // Built with .join('\n') instead of a raw multi-line template
+              // literal. Every line of THIS script stays at the same YAML
+              // indentation level no matter what the generated string looks
+              // like at runtime - avoids the block-scalar dedent trap.
+              const issueBody = [
+                '## Task Overview',
+                description,
+                '',
+                '### Deliverables & Acceptance Criteria',
+                deliverables,
+                '',
+                '### Affected Codebase Areas',
+                '```',
+                affectedAreas,
+                '```',
+                '',
+                '### Execution Instructions for Developer / OpenCode',
+                '1. Fetch ticket requirements and inspect affected packages.',
+                '2. Implement changes following standard Go idioms and project architecture rules.',
+                '3. Run local validations: `go fmt ./...`, `golangci-lint run`, and `go test -v ./...`.',
+                '4. Perform DB migration checks if SQL schemas were modified.',
+                '',
+                '---',
+                `Part of Epic #${epicIssue.number}`
+              ].join('\n');
+
               const variables = {
-                repositoryId: repositoryId,
-                title: `${ticket} – ${description}`,
-                body: `**Deliverables:**\n${deliverables}\n\nPart of epic #${epicIssue.number}`,
-                labelIds: [],  // optional: you can pass empty array
-                assigneeIds: [], // optional: you can pass empty array
-                parentIssueId: parentIssueId
+                repositoryId,
+                title: issueTitle,
+                body: issueBody,
+                parentIssueId
               };
-              
+
               try {
-                const result = await github.graphql(mutation, variables);
-                console.log(`Created issue #${result.createIssue.issue.number}`);
+                const result = await github.graphql({
+                  query: mutation,
+                  headers: { 'GraphQL-Features': 'sub_issues' },
+                  ...variables
+                });
+                console.log(`Created sub-issue #${result.createIssue.issue.number}: ${issueTitle}`);
               } catch (err) {
-                console.error(`Failed to create issue for ${ticket}:`, err);
+                console.error(`Failed to create issue for ${taskId}:`, err);
               }
             }
