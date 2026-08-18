@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS inbox, outbox, idempotency_keys, order_items, orders, products, users CASCADE;
