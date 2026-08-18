@@ -21,6 +21,7 @@ import (
 	"panzucha/internal/shared/messaging"
 	"panzucha/internal/shared/outbox"
 	"panzucha/internal/shared/server"
+	"panzucha/internal/shared/telemetry"
 	userhandler "panzucha/internal/user/handlers"
 	userrepo "panzucha/internal/user/repositories/postgres"
 	userservice "panzucha/internal/user/services"
@@ -55,6 +56,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	// 4. Telemetry (OpenTelemetry traces via OTLP, metrics via Prometheus)
+	telemetryShutdown, err := telemetry.Init(ctx, cfg.ServiceName, cfg.Version, cfg.Environment, cfg.OTLPEndpoint)
+	if err != nil {
+		slog.Error("failed to init telemetry", "error", err)
+		os.Exit(1)
+	}
+	defer telemetryShutdown(ctx)
+
 	validate := validator.New()
 	transactor := orderrepo.NewPgxTransactor(pool)
 
@@ -79,12 +88,11 @@ func main() {
 	go outboxRelay.Start(ctx)
 
 	// 5. Router (chi)
-	r, telemetryShutdown := server.NewRouter(cfg, func(r chi.Router) {
+	r := server.NewRouter(cfg, func(r chi.Router) {
 		userHandler.RegisterUserRoutes(r)
 		productHandler.RegisterProductRoutes(r)
 		orderHandler.RegisterOrderRoutes(r)
 	})
-	defer telemetryShutdown()
 
 	// 6. HTTP server
 	srv := &http.Server{

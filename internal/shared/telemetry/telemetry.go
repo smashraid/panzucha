@@ -2,31 +2,44 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/prometheus"
+	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
-func InitTelemetry(ctx context.Context, serviceName, otlpEndpoint string) (*sdktrace.TracerProvider, *metric.MeterProvider, error) {
+// Shutdown flushes telemetry and releases its resources.
+type Shutdown func(ctx context.Context) error
+
+// Init configures OpenTelemetry: traces export via OTLP to a collector,
+// metrics register on the default Prometheus registry so the existing
+// /metrics endpoint (promhttp.Handler()) serves them alongside any
+// promauto counters. It sets the global tracer and meter providers.
+func Init(ctx context.Context, serviceName, version, environment, otlpEndpoint string) (Shutdown, error) {
 	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceNameKey.String(serviceName)),
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceVersionKey.String(version),
+			semconv.DeploymentEnvironmentKey.String(environment),
+		),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// --- Traces (OTLP) ---
+	// --- Traces (OTLP to OpenTelemetry Collector) ---
 	traceExporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithInsecure(),
 		otlptracegrpc.WithEndpoint(otlpEndpoint),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExporter),
@@ -35,9 +48,11 @@ func InitTelemetry(ctx context.Context, serviceName, otlpEndpoint string) (*sdkt
 	otel.SetTracerProvider(tp)
 
 	// --- Metrics (Prometheus) ---
-	metricExporter, err := prometheus.New()
+	// Register on the default registry so /metrics serves both the OTel
+	// (otelhttp) metrics and the promauto counters defined in shared/metrics.
+	metricExporter, err := otelprometheus.New(otelprometheus.WithRegisterer(prometheus.DefaultRegisterer))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	mp := metric.NewMeterProvider(
 		metric.WithReader(metricExporter),
@@ -45,5 +60,7 @@ func InitTelemetry(ctx context.Context, serviceName, otlpEndpoint string) (*sdkt
 	)
 	otel.SetMeterProvider(mp)
 
-	return tp, mp, nil
+	return func(ctx context.Context) error {
+		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
+	}, nil
 }

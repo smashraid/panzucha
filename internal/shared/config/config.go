@@ -13,7 +13,7 @@ type Config struct {
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/panzucha_db?sslmode=disable"`
 	ServiceName string `env:"SERVICE_NAME" envDefault:"myapp"`
 
-	// OpenTelemetry OTLP endpoint (e.g., Jaeger or OpenTelemetry Collector)
+	// OpenTelemetry OTLP endpoint (OpenTelemetry Collector)
 	OTLPEndpoint string `env:"OTLP_ENDPOINT" envDefault:"localhost:4317"`
 
 	// Trusted proxies CIDR ranges (comma‑separated). Used by ClientIP middleware.
@@ -33,6 +33,3 @@ func Load() *Config {
 	}
 	return cfg
 }
-
-//export OTLP_ENDPOINT="otel-collector.monitoring.svc.cluster.local:4317"
-//export TRUSTED_PROXIES="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10"
