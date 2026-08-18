@@ -1,11 +1,9 @@
--- 00_initial_database.sql
--- Production-grade schema aligned with Go domain entities.
--- Run once. Idempotent by design (no IF NOT EXISTS for core tables to fail fast on drift).
+-- 000001_initial_schema.up.sql
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- USERS
+-- USERS & PRODUCTS
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE users (
     id            UUID PRIMARY KEY,
@@ -22,16 +20,13 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_role ON users(role);
 
--- ─────────────────────────────────────────────────────────────────────────────
--- PRODUCTS
--- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE products (
     id          UUID PRIMARY KEY,
     name        TEXT NOT NULL,
     description TEXT,
     price       DECIMAL(10,2) NOT NULL CHECK (price >= 0),
     stock       INT NOT NULL DEFAULT 0 CHECK (stock >= 0),
-    version     INT NOT NULL DEFAULT 1, -- For optimistic concurrency control
+    version     INT NOT NULL DEFAULT 1, 
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by  TEXT,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -41,7 +36,7 @@ CREATE TABLE products (
 CREATE INDEX idx_products_name ON products(name);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- ORDERS (Header)
+-- ORDERS & ORDER ITEMS
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE orders (
     id           UUID PRIMARY KEY,
@@ -59,10 +54,6 @@ CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ORDER ITEMS (1:N Relationship)
--- Normalized from []OrderItem slice. Relational DBs require a child table.
--- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE order_items (
     id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_id   UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -78,30 +69,45 @@ CREATE INDEX idx_order_items_product_id ON order_items(product_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- IDEMPOTENCY KEYS
--- ResponseBody mapped to JSONB for structured API responses. 
--- Use BYTEA if you strictly need raw bytes.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE idempotency_keys (
-    id              BIGSERIAL PRIMARY KEY,
-    key             TEXT UNIQUE NOT NULL,
+    key             TEXT PRIMARY KEY,
     resource_type   VARCHAR(50) NOT NULL,
     resource_id     UUID,
     response_status INT,
     response_body   JSONB,
-    status          TEXT        NOT NULL DEFAULT 'processing'
-                                CHECK (status IN ('processing','completed')),
+    status          TEXT NOT NULL DEFAULT 'processing'
+                    CHECK (status IN ('processing','completed')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at      TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX idx_idempotency_keys_key ON idempotency_keys(key);
 CREATE INDEX idx_idempotency_keys_status_resource ON idempotency_keys(status, resource_type);
 CREATE INDEX idx_idempotency_keys_expires_at ON idempotency_keys(expires_at);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- OUTBOX & INBOX (SAGA PATTERN)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE outbox (
+    id           UUID PRIMARY KEY,
+    event_id     UUID NOT NULL UNIQUE,
+    event_type   TEXT NOT NULL,
+    payload      JSONB NOT NULL,
+    published_at TIMESTAMPTZ,
+    retry_count  INT NOT NULL DEFAULT 0,
+    last_error   TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_outbox_unpublished ON outbox (created_at) WHERE published_at IS NULL;
+
+CREATE TABLE inbox (
+    event_id     UUID PRIMARY KEY,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- AUTOMATED AUDIT TRIGGERS
--- Keeps Audit.UpdatedAt in sync without relying on app logic.
--- Optional but strongly recommended for production consistency.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION trigger_set_updated_at()
 RETURNS TRIGGER AS $$
