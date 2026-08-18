@@ -9,7 +9,6 @@ import (
 	productdomain "panzucha/internal/product/domain"
 	shareddomain "panzucha/internal/shared/domain"
 	"panzucha/internal/shared/idempotency"
-	"panzucha/internal/shared/messaging"
 	"panzucha/internal/shared/outbox"
 	"time"
 
@@ -151,7 +150,7 @@ func (s *orderService) Create(ctx context.Context, input CreateOrderInput) (*dom
 	outbox := outbox.Outbox{
 		ID:        uuid.NewString(),
 		EventID:   uuid.NewString(),
-		EventType: messaging.EventOrderCreated,
+		EventType: domain.EventOrderCreated,
 		Payload:   responseBody,
 	}
 	s.outboxRepo.Create(ctx, tx, outbox)

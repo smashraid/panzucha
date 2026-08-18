@@ -1,25 +1,55 @@
 package domain
 
-import "context"
+import "time"
 
-// EventPublisher is the domain contract for publishing events.
-// The service layer depends on this interface — never on publisher.Publisher
-// or any messaging package directly.
-//
-// Domain-specific methods (OrderCreated, OrderFailed) are declared here so
-// the service can call them without a type assertion. The mock in tests
-// implements all methods — usually as no-ops.
-type EventPublisher interface {
-	// Publish is the low-level method used for any routing key and payload.
-	Publish(ctx context.Context, routingKey string, event any) error
+// Routing key constants used as RabbitMQ topic routing keys.
+// Consumers subscribe using patterns: "order.*" receives all order events.
+const (
+	EventOrderCreated = "order.created"
+	EventOrderPaid    = "order.paid"
+	EventOrderFailed  = "order.failed"
+	EventOrderShipped = "order.shipped"
+)
 
-	// OrderCreated publishes an event after a successful order commit.
-	// Non-fatal — publishing failure does not affect the committed order.
-	OrderCreated(ctx context.Context, order *Order)
+// BaseEvent carries fields every event must have.
+// EventID enables consumer-side deduplication.
+// Timestamp is always UTC.
+type BaseEvent struct {
+	EventID   string    `json:"event_id"`
+	EventType string    `json:"event_type"`
+	Timestamp time.Time `json:"timestamp"`
+}
 
-	// OrderFailed publishes an event when order processing fails.
-	OrderFailed(ctx context.Context, orderID, reason string)
+// OrderCreatedEvent is published after a successful order commit.
+// Items contains the full line items — not a single ProductID — because
+// an order can contain multiple products.
+type OrderCreatedEvent struct {
+	BaseEvent
+	OrderID     string      `json:"order_id"`
+	UserID      string      `json:"user_id"`
+	Items       []OrderItem `json:"items"`
+	TotalAmount float64     `json:"total_amount"`
+}
 
-	// OrderPaid publishes an event after payment confirmation.
-	OrderPaid(ctx context.Context, orderID, paymentID string)
+// OrderPaidEvent is published after payment confirmation.
+type OrderPaidEvent struct {
+	BaseEvent
+	OrderID   string    `json:"order_id"`
+	PaidAt    time.Time `json:"paid_at"`
+	PaymentID string    `json:"payment_id,omitempty"`
+}
+
+// OrderFailedEvent is published when order processing fails.
+type OrderFailedEvent struct {
+	BaseEvent
+	OrderID string `json:"order_id"`
+	Reason  string `json:"reason"`
+}
+
+// OrderShippedEvent is published when an order ships.
+type OrderShippedEvent struct {
+	BaseEvent
+	OrderID   string    `json:"order_id"`
+	ShippedAt time.Time `json:"shipped_at"`
+	Tracking  string    `json:"tracking,omitempty"`
 }

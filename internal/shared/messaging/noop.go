@@ -8,8 +8,8 @@ import "context"
 //
 // Example in tests:
 //
-//	pub := publisher.New(messaging.NewNoopBroker())
-//	svc := services.NewOrderService(..., pub)
+//	broker := messaging.NewNoopBroker()
+//	relay := outbox.NewRelay(pool, repo, broker, outbox.Config{})
 type NoopBroker struct{}
 
 var _ Broker = (*NoopBroker)(nil)

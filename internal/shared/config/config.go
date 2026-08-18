@@ -10,7 +10,7 @@ type Config struct {
 	// Existing fields
 	LogstashURL string `env:"LOGSTASH_URL" envDefault:""`
 	Environment string `env:"ENV" envDefault:"development"`
-	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/postgres?sslmode=disable"`
+	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/panzucha_db?sslmode=disable"`
 	ServiceName string `env:"SERVICE_NAME" envDefault:"myapp"`
 
 	// OpenTelemetry OTLP endpoint (e.g., Jaeger or OpenTelemetry Collector)
@@ -22,10 +22,8 @@ type Config struct {
 	// Service version – can be set during build (e.g., via -ldflags)
 	Version string `env:"SERVICE_VERSION" envDefault:"1.0.0"`
 
-	// RabbitMQ configuration
-	RabbitMQURL      string `env:"RABBITMQ_URL" envDefault:"amqp://admin:admin123@localhost:5672/"`
-	OrderExchange    string `env:"ORDER_EXCHANGE" envDefault:"order.events"`
-	OrderQueuePrefix string `env:"ORDER_QUEUE_PREFIX" envDefault:"order"`
+	// RabbitMQ connection (no exchange — that is service-specific config)
+	RabbitMQURL string `env:"RABBITMQ_URL" envDefault:"amqp://guest:guest@localhost:5672/"`
 }
 
 func Load() *Config {

@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"panzucha/internal/order/domain"
-	"panzucha/internal/order/services"
+	"panzucha/internal/user/domain"
+	shareddomain "panzucha/internal/shared/domain"
+	"panzucha/internal/user/services"
 )
 
 type mockUserRepository struct {
@@ -23,7 +24,7 @@ func newMockUserRepository() *mockUserRepository {
 func (m *mockUserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	u, ok := m.usersByID[id]
 	if !ok {
-		return nil, domain.ErrNotFound
+		return nil, shareddomain.ErrNotFound
 	}
 	return u, nil
 }
@@ -31,7 +32,7 @@ func (m *mockUserRepository) GetByID(ctx context.Context, id string) (*domain.Us
 func (m *mockUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	u, ok := m.usersByEmail[email]
 	if !ok {
-		return nil, domain.ErrNotFound
+		return nil, shareddomain.ErrNotFound
 	}
 	return u, nil
 }
@@ -44,7 +45,7 @@ func (m *mockUserRepository) Create(ctx context.Context, u *domain.User) error {
 
 func (m *mockUserRepository) Update(ctx context.Context, u *domain.User) error {
 	if _, ok := m.usersByID[u.ID]; !ok {
-		return domain.ErrNotFound
+		return shareddomain.ErrNotFound
 	}
 	m.usersByID[u.ID] = u
 	m.usersByEmail[u.Email] = u
@@ -54,7 +55,7 @@ func (m *mockUserRepository) Update(ctx context.Context, u *domain.User) error {
 func (m *mockUserRepository) Delete(ctx context.Context, id string) error {
 	u, ok := m.usersByID[id]
 	if !ok {
-		return domain.ErrNotFound
+		return shareddomain.ErrNotFound
 	}
 	delete(m.usersByID, id)
 	delete(m.usersByEmail, u.Email)
@@ -90,7 +91,7 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	// 2. Test Duplicate Registration (Conflict)
 	_, err = svc.Register(ctx, email, "Another Name", password)
-	if err != domain.ErrConflict {
+	if err != shareddomain.ErrConflict {
 		t.Errorf("expected ErrConflict, got %v", err)
 	}
 
@@ -105,13 +106,13 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	// 4. Test Login with Wrong Password
 	_, err = svc.Login(ctx, email, "wrongpassword")
-	if err != domain.ErrUnauthorized {
+	if err != shareddomain.ErrUnauthorized {
 		t.Errorf("expected ErrUnauthorized, got %v", err)
 	}
 
 	// 5. Test Login with Non-Existent User
 	_, err = svc.Login(ctx, "nonexistent@example.com", password)
-	if err != domain.ErrUnauthorized {
+	if err != shareddomain.ErrUnauthorized {
 		t.Errorf("expected ErrUnauthorized, got %v", err)
 	}
 
