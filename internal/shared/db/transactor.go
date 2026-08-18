@@ -1,4 +1,4 @@
-package postgres
+package db
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 )
 
 // Transactor abstracts transaction lifecycle management.
-// Defined here so the service layer can depend on this interface
-// instead of pgxpool.Pool directly — keeping pgx out of the service package
-// and making the order service testable without a real database.
+// Defined here so service and consumer layers can depend on this interface
+// instead of pgxpool.Pool directly — keeping pgx out of service packages
+// and making them testable without a real database.
 type Transactor interface {
 	BeginTx(ctx context.Context) (pgx.Tx, error)
 }

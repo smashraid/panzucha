@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"panzucha/internal/order/domain"
-	"panzucha/internal/order/repositories/postgres"
 	productdomain "panzucha/internal/product/domain"
+	"panzucha/internal/shared/db"
 	shareddomain "panzucha/internal/shared/domain"
 	"panzucha/internal/shared/idempotency"
 	"panzucha/internal/shared/outbox"
@@ -31,7 +31,7 @@ type OrderService interface {
 }
 
 type orderService struct {
-	transactor      postgres.Transactor // owned here to begin transactions
+	transactor      db.Transactor // owned here to begin transactions
 	orderRepo       domain.OrderRepository
 	productRepo     productdomain.ProductRepository
 	idempotencyRepo idempotency.IdempotencyKeyRepository
@@ -39,7 +39,7 @@ type orderService struct {
 }
 
 func NewOrderService(
-	transactor postgres.Transactor,
+	transactor db.Transactor,
 	orderRepo domain.OrderRepository,
 	productRepo productdomain.ProductRepository,
 	idempotencyRepo idempotency.IdempotencyKeyRepository,

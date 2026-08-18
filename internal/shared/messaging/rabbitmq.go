@@ -11,8 +11,9 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// Compile-time guard: RabbitMQBroker must satisfy Broker.
+// Compile-time guards: RabbitMQBroker must satisfy Broker and Subscriber.
 var _ Broker = (*RabbitMQBroker)(nil)
+var _ Subscriber = (*RabbitMQBroker)(nil)
 
 // RabbitMQBroker implements Broker using amqp091.
 // It owns the connection lifecycle including automatic reconnection.
@@ -146,6 +147,62 @@ func (b *RabbitMQBroker) Publish(ctx context.Context, routingKey string, payload
 			Body:         payload,
 		},
 	)
+}
+
+// Subscribe opens a consumer channel, applies prefetch, declares the queue
+// durably, and starts consuming with manual acknowledgment.
+//
+// The queue is declared with no dead-letter args here — that topology is
+// set up by the service that owns the queue (see A3). Declaring it idempotently
+// ensures Subscribe works even before the full topology wiring exists.
+func (b *RabbitMQBroker) Subscribe(ctx context.Context, queue string, prefetch int) (<-chan amqp.Delivery, error) {
+	b.mu.RLock()
+	conn := b.conn
+	reconnecting := b.reconnecting
+	b.mu.RUnlock()
+
+	if reconnecting || conn == nil {
+		return nil, fmt.Errorf("rabbitmq: broker not ready (reconnecting)")
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("rabbitmq open consumer channel: %w", err)
+	}
+
+	if err := ch.Qos(prefetch, 0, false); err != nil {
+		ch.Close()
+		return nil, fmt.Errorf("rabbitmq set qos: %w", err)
+	}
+
+	if _, err := ch.QueueDeclare(
+		queue,
+		true,  // durable — survives broker restart
+		false, // auto-delete
+		false, // exclusive
+		false, // no-wait
+		nil,
+	); err != nil {
+		ch.Close()
+		return nil, fmt.Errorf("rabbitmq declare queue %q: %w", queue, err)
+	}
+
+	deliveries, err := ch.Consume(
+		queue,
+		fmt.Sprintf("consumer-%s", queue),
+		false, // manual ack — consumer decides after DB commit
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,
+	)
+	if err != nil {
+		ch.Close()
+		return nil, fmt.Errorf("rabbitmq start consume: %w", err)
+	}
+
+	slog.Info("rabbitmq: consuming", "queue", queue)
+	return deliveries, nil
 }
 
 // Close shuts down the channel and connection cleanly.
