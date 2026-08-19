@@ -149,13 +149,95 @@ func (b *RabbitMQBroker) Publish(ctx context.Context, routingKey string, payload
 	)
 }
 
-// Subscribe opens a consumer channel, applies prefetch, declares the queue
-// durably, and starts consuming with manual acknowledgment.
+// DeclareQueue creates the full topology for a queue spec on the broker's
+// channel: DLX, DLQ + binding, and the primary queue with dead-letter args
+// bound to the main exchange. Idempotent — safe to call on every startup.
+func (b *RabbitMQBroker) DeclareQueue(ctx context.Context, q QueueSpec) error {
+	b.mu.RLock()
+	ch := b.channel
+	reconnecting := b.reconnecting
+	b.mu.RUnlock()
+
+	if reconnecting || ch == nil {
+		return fmt.Errorf("rabbitmq: broker not ready (reconnecting)")
+	}
+
+	if err := b.declareQueue(ctx, ch, q); err != nil {
+		return err
+	}
+
+	slog.Info("rabbitmq: queue topology declared",
+		"queue", q.Name,
+		"routing_key", q.RoutingKey,
+		"dlx", q.DLX,
+		"dlq", q.DLQ,
+	)
+	return nil
+}
+
+// declareQueue declares one queue's full topology on the given channel:
+//   - dead-letter exchange (if configured)
+//   - dead-letter queue, bound to the DLX under the routing key
+//   - primary queue with x-dead-letter-exchange/x-dead-letter-routing-key args,
+//     bound to the main exchange under the routing key
 //
-// The queue is declared with no dead-letter args here — that topology is
-// set up by the service that owns the queue (see A3). Declaring it idempotently
-// ensures Subscribe works even before the full topology wiring exists.
-func (b *RabbitMQBroker) Subscribe(ctx context.Context, queue string, prefetch int) (<-chan amqp.Delivery, error) {
+// Idempotent: re-declaring with identical args is a no-op in RabbitMQ.
+func (b *RabbitMQBroker) declareQueue(ctx context.Context, ch *amqp.Channel, q QueueSpec) error {
+	if q.DLX != "" {
+		if err := ch.ExchangeDeclare(
+			q.DLX,
+			"topic", // topic exchange: dead-lettered messages keep their routing key
+			true,    // durable — survives broker restart
+			false,   // auto-delete
+			false,   // internal
+			false,   // no-wait
+			nil,
+		); err != nil {
+			return fmt.Errorf("rabbitmq declare dlx %q: %w", q.DLX, err)
+		}
+	}
+
+	if q.DLQ != "" {
+		if _, err := ch.QueueDeclare(
+			q.DLQ,
+			true,  // durable — survives broker restart
+			false, // auto-delete
+			false, // exclusive
+			false, // no-wait
+			nil,   // terminal queue — no further dead-lettering
+		); err != nil {
+			return fmt.Errorf("rabbitmq declare dlq %q: %w", q.DLQ, err)
+		}
+		if err := ch.QueueBind(q.DLQ, q.RoutingKey, q.DLX, false, nil); err != nil {
+			return fmt.Errorf("rabbitmq bind dlq %q: %w", q.DLQ, err)
+		}
+	}
+
+	args := amqp.Table{}
+	if q.DLX != "" {
+		args["x-dead-letter-exchange"] = q.DLX
+		args["x-dead-letter-routing-key"] = q.RoutingKey
+	}
+	if _, err := ch.QueueDeclare(
+		q.Name,
+		true,  // durable — survives broker restart
+		false, // auto-delete
+		false, // exclusive
+		false, // no-wait
+		args,
+	); err != nil {
+		return fmt.Errorf("rabbitmq declare queue %q: %w", q.Name, err)
+	}
+	if err := ch.QueueBind(q.Name, q.RoutingKey, b.exchange, false, nil); err != nil {
+		return fmt.Errorf("rabbitmq bind queue %q: %w", q.Name, err)
+	}
+
+	return nil
+}
+
+// Subscribe ensures the queue topology exists, opens a consumer channel,
+// applies prefetch, and starts consuming with manual acknowledgment.
+func (b *RabbitMQBroker) Subscribe(ctx context.Context, q QueueSpec, prefetch int) (<-chan amqp.Delivery, error) {
 	b.mu.RLock()
 	conn := b.conn
 	reconnecting := b.reconnecting
@@ -175,21 +257,14 @@ func (b *RabbitMQBroker) Subscribe(ctx context.Context, queue string, prefetch i
 		return nil, fmt.Errorf("rabbitmq set qos: %w", err)
 	}
 
-	if _, err := ch.QueueDeclare(
-		queue,
-		true,  // durable — survives broker restart
-		false, // auto-delete
-		false, // exclusive
-		false, // no-wait
-		nil,
-	); err != nil {
+	if err := b.declareQueue(ctx, ch, q); err != nil {
 		ch.Close()
-		return nil, fmt.Errorf("rabbitmq declare queue %q: %w", queue, err)
+		return nil, err
 	}
 
 	deliveries, err := ch.Consume(
-		queue,
-		fmt.Sprintf("consumer-%s", queue),
+		q.Name,
+		fmt.Sprintf("consumer-%s", q.Name),
 		false, // manual ack — consumer decides after DB commit
 		false, // exclusive
 		false, // no-local
@@ -201,7 +276,7 @@ func (b *RabbitMQBroker) Subscribe(ctx context.Context, queue string, prefetch i
 		return nil, fmt.Errorf("rabbitmq start consume: %w", err)
 	}
 
-	slog.Info("rabbitmq: consuming", "queue", queue)
+	slog.Info("rabbitmq: consuming", "queue", q.Name)
 	return deliveries, nil
 }
 
