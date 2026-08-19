@@ -30,7 +30,7 @@ type Consumer struct {
 	sub        messaging.Subscriber
 	transactor db.Transactor
 	inboxRepo  inbox.InboxRepository
-	queueName  string
+	queue      messaging.QueueSpec
 	handler    HandlerFunc
 }
 
@@ -38,14 +38,14 @@ func New(
 	sub messaging.Subscriber,
 	transactor db.Transactor,
 	inboxRepo inbox.InboxRepository,
-	queueName string,
+	queue messaging.QueueSpec,
 	handler HandlerFunc,
 ) *Consumer {
 	return &Consumer{
 		sub:        sub,
 		transactor: transactor,
 		inboxRepo:  inboxRepo,
-		queueName:  queueName,
+		queue:      queue,
 		handler:    handler,
 	}
 }
@@ -53,21 +53,21 @@ func New(
 // Start subscribes to the queue and processes deliveries until ctx is
 // cancelled or the deliveries channel closes.
 func (c *Consumer) Start(ctx context.Context) error {
-	deliveries, err := c.sub.Subscribe(ctx, c.queueName, 10)
+	deliveries, err := c.sub.Subscribe(ctx, c.queue, 10)
 	if err != nil {
-		return fmt.Errorf("subscribe %q: %w", c.queueName, err)
+		return fmt.Errorf("subscribe %q: %w", c.queue.Name, err)
 	}
 
-	slog.Info("consumer: started", "queue", c.queueName)
+	slog.Info("consumer: started", "queue", c.queue.Name)
 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("consumer: stopping", "queue", c.queueName)
+			slog.Info("consumer: stopping", "queue", c.queue.Name)
 			return nil
 		case d, ok := <-deliveries:
 			if !ok {
-				return fmt.Errorf("deliveries channel closed for queue %q", c.queueName)
+				return fmt.Errorf("deliveries channel closed for queue %q", c.queue.Name)
 			}
 			c.handleDelivery(ctx, d)
 		}
@@ -82,7 +82,7 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery) {
 
 	tx, err := c.transactor.BeginTx(ctx)
 	if err != nil {
-		slog.Error("consumer: begin tx failed", "err", err, "queue", c.queueName, "event_id", eventID)
+		slog.Error("consumer: begin tx failed", "err", err, "queue", c.queue.Name, "event_id", eventID)
 		_ = d.Nack(false, true) // transient DB error — retry
 		return
 	}
@@ -92,13 +92,13 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery) {
 	if eventID != "" {
 		err = c.inboxRepo.Create(ctx, tx, eventID)
 		if errors.Is(err, shareddomain.ErrConflict) {
-			slog.Info("consumer: duplicate event skipped", "queue", c.queueName, "event_id", eventID)
+			slog.Info("consumer: duplicate event skipped", "queue", c.queue.Name, "event_id", eventID)
 			_ = tx.Commit(ctx)
 			_ = d.Ack(false)
 			return
 		}
 		if err != nil {
-			slog.Error("consumer: inbox insert failed", "err", err, "queue", c.queueName, "event_id", eventID)
+			slog.Error("consumer: inbox insert failed", "err", err, "queue", c.queue.Name, "event_id", eventID)
 			_ = d.Nack(false, true) // transient DB error — retry
 			return
 		}
@@ -106,14 +106,14 @@ func (c *Consumer) handleDelivery(ctx context.Context, d amqp.Delivery) {
 
 	// 2. Invoke business logic handler
 	if err := c.handler(ctx, tx, d.Body); err != nil {
-		slog.Error("consumer: handler error, routing to DLQ", "err", err, "queue", c.queueName, "event_id", eventID)
+		slog.Error("consumer: handler error, routing to DLQ", "err", err, "queue", c.queue.Name, "event_id", eventID)
 		_ = d.Nack(false, false) // requeue=false → dead-letter queue
 		return
 	}
 
 	// 3. Commit transaction, then acknowledge
 	if err := tx.Commit(ctx); err != nil {
-		slog.Error("consumer: commit failed", "err", err, "queue", c.queueName, "event_id", eventID)
+		slog.Error("consumer: commit failed", "err", err, "queue", c.queue.Name, "event_id", eventID)
 		_ = d.Nack(false, true) // transient DB error — retry
 		return
 	}

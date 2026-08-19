@@ -11,6 +11,7 @@ import (
 	"panzucha/internal/shared/db"
 	shareddomain "panzucha/internal/shared/domain"
 	"panzucha/internal/shared/inbox"
+	"panzucha/internal/shared/messaging"
 
 	"github.com/jackc/pgx/v5"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -22,7 +23,7 @@ type fakeSubscriber struct {
 	deliveries chan amqp.Delivery
 }
 
-func (f *fakeSubscriber) Subscribe(ctx context.Context, queue string, prefetch int) (<-chan amqp.Delivery, error) {
+func (f *fakeSubscriber) Subscribe(ctx context.Context, q messaging.QueueSpec, prefetch int) (<-chan amqp.Delivery, error) {
 	return f.deliveries, nil
 }
 
@@ -117,7 +118,7 @@ type consumerRun struct {
 
 func startConsumer(t *testing.T, sub *fakeSubscriber, transactor db.Transactor, inboxRepo inbox.InboxRepository, handler consumer.HandlerFunc) *consumerRun {
 	t.Helper()
-	c := consumer.New(sub, transactor, inboxRepo, "test.queue", handler)
+	c := consumer.New(sub, transactor, inboxRepo, messaging.QueueSpec{Name: "test.queue"}, handler)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- c.Start(ctx) }()

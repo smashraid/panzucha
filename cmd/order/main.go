@@ -10,6 +10,7 @@ import (
 	"time"
 
 	orderconfig "panzucha/internal/order/config"
+	"panzucha/internal/order/domain"
 	orderhandler "panzucha/internal/order/handlers"
 	orderrepo "panzucha/internal/order/repositories/postgres"
 	orderservice "panzucha/internal/order/services"
@@ -48,8 +49,22 @@ func main() {
 	}
 	defer broker.Close()
 
-	// 3. Database connection
+	// Declare the order queue topology: primary queue + dead-letter queue
+	// bound to the order.events exchange. Names derive from config/domain
+	// constants — no hardcoded literals.
 	ctx := context.Background()
+	orderQueue := messaging.QueueSpec{
+		Name:       orderCfg.QueuePrefix + ".created",
+		RoutingKey: domain.EventOrderCreated,
+		DLX:        orderCfg.Exchange + ".dlx",
+		DLQ:        orderCfg.QueuePrefix + ".created.dlq",
+	}
+	if err := broker.DeclareQueue(ctx, orderQueue); err != nil {
+		slog.Error("failed to declare RabbitMQ queue topology", "error", err)
+		os.Exit(1)
+	}
+
+	// 3. Database connection
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
