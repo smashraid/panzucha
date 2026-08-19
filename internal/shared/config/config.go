@@ -10,7 +10,7 @@ type Config struct {
 	// Existing fields
 	LogstashURL string `env:"LOGSTASH_URL" envDefault:""`
 	Environment string `env:"ENV" envDefault:"development"`
-	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/panzucha_db?sslmode=disable"`
+	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://admin:admin@localhost:5432/panzucha?sslmode=disable"`
 	ServiceName string `env:"SERVICE_NAME" envDefault:"myapp"`
 
 	// OpenTelemetry OTLP endpoint (OpenTelemetry Collector)

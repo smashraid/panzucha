@@ -40,7 +40,7 @@ We partnered with UrbanCart to rebuild their core API from scratch in Go, focusi
 | :--- | :--- | :--- |
 | **Logstash Dependency** | Implemented **async, non‑blocking logging** (queue + worker). Logs write to `stdout` first; a background goroutine ships them. If the queue fills, logs are dropped (fail‑open). | API remained stable even when Logstash was offline. No more cascading failures. |
 | **Inventory Overselling** | Added a `DecrementStock` method with **optimistic locking** using a `version` column in PostgreSQL. All stock updates run in a transaction. | Concurrent orders for the last product result in only one success; others receive a `409 Conflict`. **Zero overselling**. |
-| **Blind Debugging** | Integrated **OpenTelemetry tracing** with Jaeger to visualise request flow across handlers, services, and DB. Added **structured JSON logs** with `request_id` to correlate logs with traces. | Mean Time To Resolution (MTTR) dropped from 2 hours to 15 minutes. Root causes identified instantly. |
+| **Blind Debugging** | Integrated **OpenTelemetry tracing** (OTLP export) to visualise request flow across handlers, services, and DB. Added **structured JSON logs** with `request_id` to correlate logs with traces. | Mean Time To Resolution (MTTR) dropped from 2 hours to 15 minutes. Root causes identified instantly. |
 | **Feature Delivery** | Adopted **Clean Architecture** – business logic separated from HTTP and DB concerns. Swapping external dependencies requires zero changes to core business rules. | New features ship in **days instead of weeks**. Accelerated time‑to‑market. |
 
 ### 🚀 The Results (Pre‑Launch Load Test)
@@ -94,7 +94,7 @@ flowchart TB
     PG[(PostgreSQL)]
     Prometheus[Prometheus]
     Grafana[Grafana]
-    Jaeger[Jaeger]
+    OTelCollector[OpenTelemetry Collector]
     Splunk[Splunk / ELK]
   end
 
@@ -118,7 +118,7 @@ flowchart TB
 
   Handlers -->|/metrics| Prometheus
   Prometheus -->|visualise| Grafana
-  Services -->|OpenTelemetry traces| Jaeger
+  Services -->|OpenTelemetry traces| OTelCollector
 
   %% Class Styling for High Contrast
   classDef default fill:#2d3748,stroke:#4a5568,stroke-width:2px,color:#ffffff;
@@ -133,14 +133,14 @@ flowchart TB
   class LB,Ingress,Middleware,Handlers,Services,Domain gateway;
   class Repo,PG storage;
   class LoggerPkg,Splunk logs;
-  class Prometheus,Grafana,Jaeger metrics;
+  class Prometheus,Grafana,OTelCollector metrics;
 ```
 
 Data flow:
 
 1. **Request flow** – Ingress receives REST request, applies rate limiting & JWT auth, calls handler. Handler extracts request metadata (request ID, user ID, client IP), validates DTO, maps to domain model, passes to service. Service applies business logic, uses repository interface to read/write PostgreSQL.
 2. **Logging flow** – Handler, service, and repository call structured logging methods with category, sub_category, duration_ms, performance_bucket, request_id, user_id. Logs are written to stdout (immediate) and asynchronously queued for optional shipping to Logstash/Splunk. No dependency on external collector.
-3. **Observability** – Prometheus scrapes /metrics for HTTP latency histograms, DB operation counters, goroutine count, and custom business metrics. Grafana visualises dashboards. OpenTelemetry traces propagate from handler → service → repository → PostgreSQL, exporting to Jaeger.
+3. **Observability** – Prometheus scrapes /metrics for HTTP latency histograms, DB operation counters, goroutine count, and custom business metrics. Grafana visualises dashboards. OpenTelemetry traces propagate from handler → service → repository → PostgreSQL, exporting via OTLP to an OpenTelemetry Collector.
 4. **Graceful shutdown** – On SIGTERM, API stops accepting new requests, finishes existing ones (max 30s), closes DB pool, then exits. K8s liveness/readiness probes prevent traffic during shutdown.
 
 ## ✨ Best Practices & Patterns Shown
@@ -168,7 +168,7 @@ Data flow:
 - **Authentication**: `golang-jwt/jwt` (JWT with roles)
 - **Logging**: Structured JSON to `stdout` + async queue for external shipping (Splunk/Logstash optional)
 - **Metrics**: `prometheus/client_golang`
-- **Tracing**: OpenTelemetry + Jaeger (optional)
+- **Tracing**: OpenTelemetry (OTLP export, optional)
 - **Deployment**: Docker + Kubernetes (Helm chart included)
 - **Testing**: `testing` package + `testcontainers` (integration tests) + `go test -race`
 - **CI/CD**: GitHub Actions – test, race detection, build, push to GHCR
@@ -196,8 +196,8 @@ docker-compose up -d postgres
 
 ### 3. Run migrations
 ```bash
-# Using golang-migrate
-migrate -path migrations -database "postgres://postgres:password@localhost:5432/panzucha?sslmode=disable" up
+# Using golang-migrate (per-service migration dirs)
+migrate -path migrations/order -database "postgres://admin:admin@localhost:5432/panzucha_db?sslmode=disable" up
 
 ```
 
@@ -209,7 +209,7 @@ cp .env.example .env
 
 ### 5. Run the API
 ```bash
-go run ./cmd/api
+go run ./cmd/order
 ```
 The API will start on http://localhost:8080
 

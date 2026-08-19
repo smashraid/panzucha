@@ -17,6 +17,7 @@ import (
 	productrepo "panzucha/internal/product/repositories/postgres"
 	productservice "panzucha/internal/product/services"
 	"panzucha/internal/shared/config"
+	"panzucha/internal/shared/db"
 	"panzucha/internal/shared/idempotency"
 	"panzucha/internal/shared/messaging"
 	"panzucha/internal/shared/outbox"
@@ -65,7 +66,7 @@ func main() {
 	defer telemetryShutdown(ctx)
 
 	validate := validator.New()
-	transactor := orderrepo.NewPgxTransactor(pool)
+	transactor := db.NewPgxTransactor(pool)
 
 	// 4. Repository -> Service -> Handler
 	userRepo := userrepo.NewPostgresUserRepository(pool)
