@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"panzucha/internal/user/domain"
 	shareddomain "panzucha/internal/shared/domain"
+	"panzucha/internal/user/domain"
 	"panzucha/internal/user/services"
 )
 
