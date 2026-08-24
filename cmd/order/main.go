@@ -10,6 +10,7 @@ import (
 	"time"
 
 	orderconfig "panzucha/internal/order/config"
+	"panzucha/internal/order/consumers"
 	"panzucha/internal/order/domain"
 	orderhandler "panzucha/internal/order/handlers"
 	orderrepo "panzucha/internal/order/repositories/postgres"
@@ -18,8 +19,10 @@ import (
 	productrepo "panzucha/internal/product/repositories/postgres"
 	productservice "panzucha/internal/product/services"
 	"panzucha/internal/shared/config"
+	"panzucha/internal/shared/consumer"
 	"panzucha/internal/shared/db"
 	"panzucha/internal/shared/idempotency"
+	"panzucha/internal/shared/inbox"
 	"panzucha/internal/shared/messaging"
 	"panzucha/internal/shared/outbox"
 	"panzucha/internal/shared/server"
@@ -52,20 +55,22 @@ func main() {
 	// Declare the order queue topology: primary queue + dead-letter queue
 	// bound to the order.events exchange. Names derive from config/domain
 	// constants — no hardcoded literals.
-	ctx := context.Background()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	orderQueue := messaging.QueueSpec{
 		Name:       orderCfg.QueuePrefix + ".created",
 		RoutingKey: domain.EventOrderCreated,
 		DLX:        orderCfg.Exchange + ".dlx",
 		DLQ:        orderCfg.QueuePrefix + ".created.dlq",
 	}
-	if err := broker.DeclareQueue(ctx, orderQueue); err != nil {
+	if err := broker.DeclareQueue(appCtx, orderQueue); err != nil {
 		slog.Error("failed to declare RabbitMQ queue topology", "error", err)
 		os.Exit(1)
 	}
 
 	// 3. Database connection
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := pgxpool.New(appCtx, cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
@@ -73,12 +78,12 @@ func main() {
 	defer pool.Close()
 
 	// 4. Telemetry (OpenTelemetry traces via OTLP, metrics via Prometheus)
-	telemetryShutdown, err := telemetry.Init(ctx, cfg.ServiceName, cfg.Version, cfg.Environment, cfg.OTLPEndpoint)
+	telemetryShutdown, err := telemetry.Init(appCtx, cfg.ServiceName, cfg.Version, cfg.Environment, cfg.OTLPEndpoint)
 	if err != nil {
 		slog.Error("failed to init telemetry", "error", err)
 		os.Exit(1)
 	}
-	defer telemetryShutdown(ctx)
+	defer telemetryShutdown(appCtx)
 
 	validate := validator.New()
 	transactor := db.NewPgxTransactor(pool)
@@ -101,7 +106,18 @@ func main() {
 
 	outboxCfg := outbox.Config{}
 	outboxRelay := outbox.NewRelay(pool, outboxRepo, broker, outboxCfg)
-	go outboxRelay.Start(ctx)
+	go func() {
+		outboxRelay.Start(appCtx)
+	}()
+
+	// Transactional-inbox consumer for order.created (Phase A no-op handler).
+	inboxRepo := inbox.NewPostgresInboxRepository(pool)
+	orderConsumer := consumer.New(broker, transactor, inboxRepo, orderQueue, consumers.HandleOrderCreated)
+	go func() {
+		if err := orderConsumer.Start(appCtx); err != nil {
+			slog.Error("order consumer stopped with error", "error", err)
+		}
+	}()
 
 	// 5. Router (chi)
 	r := server.NewRouter(cfg, func(r chi.Router) {
@@ -130,6 +146,11 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server...")
+
+	// Cancel the app context first so background workers (outbox relay,
+	// order consumer) stop cleanly, then drain the HTTP server.
+	appCancel()
+
 	ctxShutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctxShutdown); err != nil {

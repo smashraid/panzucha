@@ -16,5 +16,5 @@ var _ Broker = (*NoopBroker)(nil)
 
 func NewNoopBroker() *NoopBroker { return &NoopBroker{} }
 
-func (n *NoopBroker) Publish(_ context.Context, _ string, _ []byte) error { return nil }
-func (n *NoopBroker) Close()                                              {}
+func (n *NoopBroker) Publish(_ context.Context, _, _ string, _ []byte) error { return nil }
+func (n *NoopBroker) Close()                                                 {}

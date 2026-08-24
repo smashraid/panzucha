@@ -12,9 +12,12 @@ import "context"
 //   - NoopBroker      — silent drop for tests and local dev
 type Broker interface {
 	// Publish sends a raw JSON payload to the given routing key.
-	// The broker decides what "routing key" means — topic in RabbitMQ,
-	// topic name in Kafka, queue URL in SQS.
-	Publish(ctx context.Context, routingKey string, payload []byte) error
+	// eventID is the canonical outbox EventID — implementations MUST carry it
+	// as the message's MessageId so consumer-side inbox deduplication keys on
+	// the same identifier the producer committed. The broker decides what
+	// "routing key" means — topic in RabbitMQ, topic name in Kafka, queue URL
+	// in SQS.
+	Publish(ctx context.Context, routingKey string, eventID string, payload []byte) error
 
 	// Close cleanly shuts down the broker connection.
 	Close()
