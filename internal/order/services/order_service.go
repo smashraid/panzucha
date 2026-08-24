@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"panzucha/internal/order/domain"
 	productdomain "panzucha/internal/product/domain"
 	"panzucha/internal/shared/db"
@@ -147,13 +148,37 @@ func (s *orderService) Create(ctx context.Context, input CreateOrderInput) (*dom
 		return nil, svcErr
 	}
 
+	// Canonical OrderCreatedEvent — the outbox payload consumers receive.
+	// The raw-Order JSON above is only the idempotency HTTP response body.
+	items := make([]domain.OrderItem, len(order.Items))
+	copy(items, order.Items)
+	eventID := uuid.NewString()
+	eventPayload, err := json.Marshal(domain.OrderCreatedEvent{
+		BaseEvent: domain.BaseEvent{
+			EventID:   eventID,
+			EventType: domain.EventOrderCreated,
+			Timestamp: time.Now().UTC(),
+		},
+		OrderID:     order.ID,
+		UserID:      order.UserID,
+		Items:       items,
+		TotalAmount: order.TotalAmount,
+	})
+	if err != nil {
+		svcErr = err
+		return nil, svcErr
+	}
+
 	outbox := outbox.Outbox{
 		ID:        uuid.NewString(),
-		EventID:   uuid.NewString(),
+		EventID:   eventID,
 		EventType: domain.EventOrderCreated,
-		Payload:   responseBody,
+		Payload:   eventPayload,
 	}
-	s.outboxRepo.Create(ctx, tx, outbox)
+	if err := s.outboxRepo.Create(ctx, tx, outbox); err != nil {
+		svcErr = fmt.Errorf("create outbox entry: %w", err)
+		return nil, svcErr
+	}
 
 	// ── Step 8: Commit ────────────────────────────────────────────────────
 	if err := tx.Commit(ctx); err != nil {

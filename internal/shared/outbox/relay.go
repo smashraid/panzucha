@@ -140,7 +140,7 @@ func (r *Relay) publishAll(ctx context.Context, rows []Outbox) (succeeded, faile
 	for _, row := range rows {
 		row := row // capture loop variable
 		g.Go(func() error {
-			err := r.broker.Publish(gctx, row.EventType, row.Payload)
+			err := r.broker.Publish(gctx, row.EventType, row.EventID, row.Payload)
 
 			mu.Lock()
 			defer mu.Unlock()

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -122,9 +121,11 @@ func (b *RabbitMQBroker) handleReconnect(connClose <-chan *amqp.Error) {
 }
 
 // Publish sends a pre-serialised JSON payload to the exchange.
+// eventID is carried as the AMQP MessageId so the consumer's inbox dedup
+// keys on the same identifier as the producer's outbox row.
 // Returns an error immediately if the broker is reconnecting so the
 // caller can decide to retry or accept the loss.
-func (b *RabbitMQBroker) Publish(ctx context.Context, routingKey string, payload []byte) error {
+func (b *RabbitMQBroker) Publish(ctx context.Context, routingKey string, eventID string, payload []byte) error {
 	b.mu.RLock()
 	ch := b.channel
 	reconnecting := b.reconnecting
@@ -141,8 +142,8 @@ func (b *RabbitMQBroker) Publish(ctx context.Context, routingKey string, payload
 		false, // immediate
 		amqp.Publishing{
 			ContentType:  "application/json",
-			DeliveryMode: amqp.Persistent,  // survives broker restart when queue is durable
-			MessageId:    uuid.NewString(), // for consumer-side deduplication
+			DeliveryMode: amqp.Persistent, // survives broker restart when queue is durable
+			MessageId:    eventID,         // consumer-side deduplication key
 			Timestamp:    time.Now().UTC(),
 			Body:         payload,
 		},
